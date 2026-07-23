@@ -1,4 +1,4 @@
-import { listJobs } from "@/lib/queries";
+import { listDocuments, listJobs } from "@/lib/queries";
 import { getDb } from "@/lib/db";
 import AddJobForm from "@/components/AddJobForm";
 import JobTable from "@/components/JobTable";
@@ -18,8 +18,8 @@ export default function Dashboard() {
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8 space-y-6">
-      <h1 className="text-2xl font-bold">JobManager</h1>
-      <AddJobForm />
+      <h1 className="text-2xl font-bold">Applications</h1>
+      <AddJobForm resumes={listDocuments("resume")} coverLetters={listDocuments("cover_letter")} />
       <JobTable jobs={jobs} nextRounds={nextRounds} />
     </main>
   );

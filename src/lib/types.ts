@@ -7,7 +7,24 @@ export interface Job {
   title: string;
   url: string | null;
   notes: string;
+  resume_id: number | null;
+  cover_letter_id: number | null;
   created_at: string;
+}
+
+export type DocumentKind = "resume" | "cover_letter";
+
+export interface AppDocument {
+  id: number;
+  kind: DocumentKind;
+  name: string;
+  file_path: string;
+  uploaded_at: string;
+}
+
+/** Document plus the jobs it's linked to (for the documents pages). */
+export interface DocumentWithUsage extends AppDocument {
+  used_by: { id: number; company: string; title: string }[];
 }
 
 export interface StatusEvent {

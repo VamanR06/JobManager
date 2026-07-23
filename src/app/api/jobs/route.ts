@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createJob, createEvent, listJobs, upsertPosting } from "@/lib/queries";
+import { createJob, createEvent, listJobs, updateJob, upsertPosting } from "@/lib/queries";
 import { parsePostingUrl } from "@/lib/parser";
 import { STATUSES } from "@/lib/types";
 
@@ -9,12 +9,15 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { company, title, url, notes, posting, initial_status, occurred_at } = body;
+  const { company, title, url, notes, posting, initial_status, occurred_at, resume_id, cover_letter_id } = body;
   if (!company?.trim() || !title?.trim()) {
     return NextResponse.json({ error: "company and title are required" }, { status: 400 });
   }
 
-  const job = createJob({ company: company.trim(), title: title.trim(), url: url || null, notes });
+  let job = createJob({ company: company.trim(), title: title.trim(), url: url || null, notes });
+  if (resume_id || cover_letter_id) {
+    job = updateJob(job.id, { resume_id: resume_id ?? null, cover_letter_id: cover_letter_id ?? null })!;
+  }
 
   if (initial_status && STATUSES.includes(initial_status)) {
     createEvent({ job_id: job.id, status: initial_status, occurred_at: occurred_at || null });

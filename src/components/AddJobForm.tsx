@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { STATUSES, type Status } from "@/lib/types";
+import { STATUSES, type AppDocument, type Status } from "@/lib/types";
+import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/format";
 
 interface ParsedPosting {
   title: string | null;
@@ -11,13 +12,26 @@ interface ParsedPosting {
   description_md: string;
 }
 
-export default function AddJobForm() {
+interface Props {
+  resumes: AppDocument[];
+  coverLetters: AppDocument[];
+}
+
+export default function AddJobForm({ resumes, coverLetters }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");
   const [company, setCompany] = useState("");
   const [title, setTitle] = useState("");
   const [initialStatus, setInitialStatus] = useState<Status | "">("applied");
+  const [when, setWhen] = useState("");
+  const [resumeId, setResumeId] = useState("");
+  const [coverLetterId, setCoverLetterId] = useState("");
+
+  // Default the status date to now (set after mount to avoid hydration mismatch).
+  useEffect(() => {
+    setWhen(toDatetimeLocal(new Date().toISOString()));
+  }, []);
   const [posting, setPosting] = useState<ParsedPosting | null>(null);
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -66,6 +80,9 @@ export default function AddJobForm() {
           url: url || null,
           posting: posting?.description_md ? posting : undefined,
           initial_status: initialStatus || undefined,
+          occurred_at: fromDatetimeLocal(when),
+          resume_id: resumeId ? Number(resumeId) : null,
+          cover_letter_id: coverLetterId ? Number(coverLetterId) : null,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Save failed");
@@ -74,6 +91,9 @@ export default function AddJobForm() {
       setTitle("");
       setPosting(null);
       setNotice(null);
+      setResumeId("");
+      setCoverLetterId("");
+      setWhen(toDatetimeLocal(new Date().toISOString()));
       setOpen(false);
       router.refresh();
     } catch (err) {
@@ -151,6 +171,44 @@ export default function AddJobForm() {
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <label className="text-xs text-zinc-500">
+          Date
+          <input
+            type="datetime-local"
+            value={when}
+            onChange={(e) => setWhen(e.target.value)}
+            className={`${inputCls} mt-1`}
+          />
+        </label>
+        <label className="text-xs text-zinc-500">
+          Resume used
+          <select value={resumeId} onChange={(e) => setResumeId(e.target.value)} className={`${inputCls} mt-1`}>
+            <option value="">— none —</option>
+            {resumes.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-zinc-500">
+          Cover letter used
+          <select
+            value={coverLetterId}
+            onChange={(e) => setCoverLetterId(e.target.value)}
+            className={`${inputCls} mt-1`}
+          >
+            <option value="">— none —</option>
+            {coverLetters.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {notice && <p className="text-xs text-green-600 dark:text-green-400">{notice}</p>}

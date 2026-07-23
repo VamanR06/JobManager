@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getJob, getPosting, listEvents, listRecordings, pendingAfter } from "@/lib/queries";
+import { getJob, getPosting, listDocuments, listEvents, listRecordings, pendingAfter } from "@/lib/queries";
 import { formatElapsed } from "@/lib/format";
 import JobHeader from "@/components/JobHeader";
 import PostingSection from "@/components/PostingSection";
@@ -26,7 +26,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
         ← All applications
       </Link>
 
-      <JobHeader job={job} />
+      <JobHeader job={job} resumes={listDocuments("resume")} coverLetters={listDocuments("cover_letter")} />
       <PostingSection jobId={id} posting={posting} hasUrl={!!job.url} />
 
       <section className="space-y-1">

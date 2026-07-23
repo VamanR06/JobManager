@@ -1,5 +1,7 @@
 import { getDb } from "./db";
-import type { Job, JobWithStatus, Posting, Recording, Status, StatusEvent } from "./types";
+import type {
+  AppDocument, DocumentKind, DocumentWithUsage, Job, JobWithStatus, Posting, Recording, Status, StatusEvent,
+} from "./types";
 
 // ---------- jobs ----------
 
@@ -26,13 +28,25 @@ export function createJob(input: { company: string; title: string; url?: string 
   return getJob(Number(res.lastInsertRowid))!;
 }
 
-export function updateJob(id: number, input: Partial<Pick<Job, "company" | "title" | "url" | "notes">>): Job | null {
+export function updateJob(
+  id: number,
+  input: Partial<Pick<Job, "company" | "title" | "url" | "notes" | "resume_id" | "cover_letter_id">>
+): Job | null {
   const job = getJob(id);
   if (!job) return null;
   getDb()
-    .prepare("UPDATE jobs SET company = ?, title = ?, url = ?, notes = ? WHERE id = ?")
-    .run(input.company ?? job.company, input.title ?? job.title,
-         input.url !== undefined ? input.url : job.url, input.notes ?? job.notes, id);
+    .prepare(
+      "UPDATE jobs SET company = ?, title = ?, url = ?, notes = ?, resume_id = ?, cover_letter_id = ? WHERE id = ?"
+    )
+    .run(
+      input.company ?? job.company,
+      input.title ?? job.title,
+      input.url !== undefined ? input.url : job.url,
+      input.notes ?? job.notes,
+      input.resume_id !== undefined ? input.resume_id : job.resume_id,
+      input.cover_letter_id !== undefined ? input.cover_letter_id : job.cover_letter_id,
+      id
+    );
   return getJob(id);
 }
 
@@ -145,6 +159,43 @@ export function finishRecording(id: number, state: "done" | "failed"): Recording
 
 export function deleteRecording(id: number): void {
   getDb().prepare("DELETE FROM recordings WHERE id = ?").run(id);
+}
+
+// ---------- documents (resumes / cover letters) ----------
+
+export function listDocuments(kind: DocumentKind): DocumentWithUsage[] {
+  const db = getDb();
+  const docs = db
+    .prepare("SELECT * FROM documents WHERE kind = ? ORDER BY uploaded_at DESC, id DESC")
+    .all(kind) as AppDocument[];
+  const linkCol = kind === "resume" ? "resume_id" : "cover_letter_id";
+  const usageStmt = db.prepare(
+    `SELECT id, company, title FROM jobs WHERE ${linkCol} = ? ORDER BY created_at DESC`
+  );
+  return docs.map((doc) => ({
+    ...doc,
+    used_by: usageStmt.all(doc.id) as DocumentWithUsage["used_by"],
+  }));
+}
+
+export function getDocument(id: number): AppDocument | null {
+  return (getDb().prepare("SELECT * FROM documents WHERE id = ?").get(id) as AppDocument | undefined) ?? null;
+}
+
+export function createDocument(kind: DocumentKind, name: string, filePath: string): AppDocument {
+  const res = getDb()
+    .prepare("INSERT INTO documents (kind, name, file_path) VALUES (?, ?, ?)")
+    .run(kind, name, filePath);
+  return getDocument(Number(res.lastInsertRowid))!;
+}
+
+export function renameDocument(id: number, name: string): AppDocument | null {
+  getDb().prepare("UPDATE documents SET name = ? WHERE id = ?").run(name, id);
+  return getDocument(id);
+}
+
+export function deleteDocument(id: number): void {
+  getDb().prepare("DELETE FROM documents WHERE id = ?").run(id);
 }
 
 // ---------- postings ----------

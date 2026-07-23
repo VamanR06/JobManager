@@ -2,9 +2,16 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Job } from "@/lib/types";
+import type { AppDocument, Job } from "@/lib/types";
+import DocumentPicker from "./DocumentPicker";
 
-export default function JobHeader({ job }: { job: Job }) {
+interface Props {
+  job: Job;
+  resumes: AppDocument[];
+  coverLetters: AppDocument[];
+}
+
+export default function JobHeader({ job, resumes, coverLetters }: Props) {
   const router = useRouter();
   const [notes, setNotes] = useState(job.notes);
 
@@ -45,6 +52,16 @@ export default function JobHeader({ job }: { job: Job }) {
         <button onClick={remove} className="shrink-0 text-xs text-zinc-400 hover:text-red-500">
           delete job
         </button>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <DocumentPicker jobId={job.id} field="resume_id" label="Resume" options={resumes} value={job.resume_id} />
+        <DocumentPicker
+          jobId={job.id}
+          field="cover_letter_id"
+          label="Cover letter"
+          options={coverLetters}
+          value={job.cover_letter_id}
+        />
       </div>
       <textarea
         value={notes}

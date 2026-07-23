@@ -1,17 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { STATUSES, type Status } from "@/lib/types";
-import { fromDatetimeLocal } from "@/lib/format";
+import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/format";
 
 export default function AddEventForm({ jobId, nextRound }: { jobId: number; nextRound: number }) {
   const router = useRouter();
   const [status, setStatus] = useState<Status>("applied");
   const [round, setRound] = useState(String(nextRound));
   const [score, setScore] = useState("");
-  const [when, setWhen] = useState(""); // empty = now
+  const [when, setWhen] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Default the date to now (set after mount to avoid hydration mismatch).
+  useEffect(() => {
+    setWhen(toDatetimeLocal(new Date().toISOString()));
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,7 +34,7 @@ export default function AddEventForm({ jobId, nextRound }: { jobId: number; next
         }),
       });
       setScore("");
-      setWhen("");
+      setWhen(toDatetimeLocal(new Date().toISOString()));
       router.refresh();
     } finally {
       setSaving(false);
@@ -70,7 +75,7 @@ export default function AddEventForm({ jobId, nextRound }: { jobId: number; next
         type="datetime-local"
         value={when}
         onChange={(e) => setWhen(e.target.value)}
-        title="Backdate (leave empty for now)"
+        title="When this happened (defaults to now)"
         className={inputCls}
       />
       <button
