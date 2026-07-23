@@ -19,6 +19,7 @@ export interface AppDocument {
   kind: DocumentKind;
   name: string;
   file_path: string;
+  archived: 0 | 1;
   uploaded_at: string;
 }
 

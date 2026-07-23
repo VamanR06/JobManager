@@ -77,6 +77,12 @@ function open(): Database.Database {
   if (!jobCols.includes("cover_letter_id")) {
     db.exec("ALTER TABLE jobs ADD COLUMN cover_letter_id INTEGER REFERENCES documents(id) ON DELETE SET NULL");
   }
+  // Migration: archived flag — in-use documents are archived on "delete" so
+  // applications always keep the exact file they were submitted with.
+  const docCols = (db.prepare("PRAGMA table_info(documents)").all() as { name: string }[]).map((c) => c.name);
+  if (!docCols.includes("archived")) {
+    db.exec("ALTER TABLE documents ADD COLUMN archived INTEGER NOT NULL DEFAULT 0");
+  }
   // Sweep recordings orphaned by a server restart mid-recording.
   db.prepare("UPDATE recordings SET state = 'failed' WHERE state = 'recording'").run();
   return db;

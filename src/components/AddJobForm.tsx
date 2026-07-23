@@ -17,7 +17,10 @@ interface Props {
   coverLetters: AppDocument[];
 }
 
-export default function AddJobForm({ resumes, coverLetters }: Props) {
+export default function AddJobForm({ resumes: allResumes, coverLetters: allCoverLetters }: Props) {
+  // New applications can only attach active (non-archived) documents.
+  const resumes = allResumes.filter((d) => !d.archived);
+  const coverLetters = allCoverLetters.filter((d) => !d.archived);
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState("");

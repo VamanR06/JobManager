@@ -14,6 +14,8 @@ interface Props {
 /** Dropdown linking a resume/cover letter to a job, with a view link when set. */
 export default function DocumentPicker({ jobId, field, label, options, value }: Props) {
   const router = useRouter();
+  // Archived documents can't be newly attached, but stay visible if already linked.
+  const visible = options.filter((doc) => !doc.archived || doc.id === value);
 
   async function save(newValue: string) {
     await fetch(`/api/jobs/${jobId}`, {
@@ -33,9 +35,10 @@ export default function DocumentPicker({ jobId, field, label, options, value }: 
         className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
       >
         <option value="">— none —</option>
-        {options.map((doc) => (
+        {visible.map((doc) => (
           <option key={doc.id} value={doc.id}>
             {doc.name}
+            {doc.archived ? " (archived)" : ""}
           </option>
         ))}
       </select>

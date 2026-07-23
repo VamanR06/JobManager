@@ -194,6 +194,18 @@ export function renameDocument(id: number, name: string): AppDocument | null {
   return getDocument(id);
 }
 
+export function setDocumentArchived(id: number, archived: boolean): AppDocument | null {
+  getDb().prepare("UPDATE documents SET archived = ? WHERE id = ?").run(archived ? 1 : 0, id);
+  return getDocument(id);
+}
+
+/** Jobs linked to this document (either slot). */
+export function documentUsage(id: number): { id: number; company: string; title: string }[] {
+  return getDb()
+    .prepare("SELECT id, company, title FROM jobs WHERE resume_id = ? OR cover_letter_id = ?")
+    .all(id, id) as { id: number; company: string; title: string }[];
+}
+
 export function deleteDocument(id: number): void {
   getDb().prepare("DELETE FROM documents WHERE id = ?").run(id);
 }

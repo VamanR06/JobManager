@@ -15,6 +15,10 @@ export default function DocumentsView({ kind, documents }: { kind: DocumentKind;
   const [error, setError] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+
+  const activeDocs = documents.filter((d) => !d.archived);
+  const archivedDocs = documents.filter((d) => d.archived);
 
   async function upload(files: FileList | null) {
     if (!files?.length) return;
@@ -48,9 +52,20 @@ export default function DocumentsView({ kind, documents }: { kind: DocumentKind;
   }
 
   async function remove(doc: DocumentWithUsage) {
-    const usage = doc.used_by.length ? ` It's linked to ${doc.used_by.length} application(s) — they'll be unlinked.` : "";
-    if (!confirm(`Delete "${doc.name}"?${usage}`)) return;
+    const msg = doc.used_by.length
+      ? `Archive "${doc.name}"? It's linked to ${doc.used_by.length} application(s), so the file is kept and those links stay exactly as submitted — it just can't be attached to new applications.`
+      : `Delete "${doc.name}"? It isn't linked to any application, so the file will be removed permanently.`;
+    if (!confirm(msg)) return;
     await fetch(`/api/documents/${doc.id}`, { method: "DELETE" });
+    router.refresh();
+  }
+
+  async function restore(doc: DocumentWithUsage) {
+    await fetch(`/api/documents/${doc.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived: false }),
+    });
     router.refresh();
   }
 
@@ -72,7 +87,9 @@ export default function DocumentsView({ kind, documents }: { kind: DocumentKind;
         >
           {uploading ? "Uploading…" : `+ Upload ${LABEL[kind]}`}
         </button>
-        <span className="text-xs text-zinc-400">PDF, Word, or text</span>
+        <span className="text-xs text-zinc-400">
+          PDF, Word, or text · each upload is a separate version — applications always keep the exact file they used
+        </span>
       </div>
       {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
 
@@ -87,7 +104,7 @@ export default function DocumentsView({ kind, documents }: { kind: DocumentKind;
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {documents.map((doc) => (
+            {activeDocs.map((doc) => (
               <tr key={doc.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50">
                 <td className="px-4 py-2.5 font-medium">
                   {renamingId === doc.id ? (
@@ -142,12 +159,12 @@ export default function DocumentsView({ kind, documents }: { kind: DocumentKind;
                     rename
                   </button>
                   <button onClick={() => void remove(doc)} className="text-xs text-zinc-400 hover:text-red-500">
-                    delete
+                    {doc.used_by.length > 0 ? "archive" : "delete"}
                   </button>
                 </td>
               </tr>
             ))}
-            {documents.length === 0 && (
+            {activeDocs.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-4 py-8 text-center text-zinc-400">
                   No {LABEL[kind]}s uploaded yet.
@@ -157,6 +174,58 @@ export default function DocumentsView({ kind, documents }: { kind: DocumentKind;
           </tbody>
         </table>
       </div>
+
+      {archivedDocs.length > 0 && (
+        <div className="space-y-2">
+          <button onClick={() => setShowArchived(!showArchived)} className="text-xs text-zinc-500 hover:underline">
+            {showArchived ? "▾" : "▸"} Archived ({archivedDocs.length}) — kept because applications reference them
+          </button>
+          {showArchived && (
+            <div className="overflow-x-auto rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700">
+              <table className="w-full text-sm">
+                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {archivedDocs.map((doc) => (
+                    <tr key={doc.id} className="text-zinc-500">
+                      <td className="px-4 py-2.5">
+                        <a
+                          href={`/api/documents/${doc.id}/file`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="hover:underline"
+                        >
+                          {doc.name}
+                        </a>
+                        <span className="ml-2 rounded-full bg-zinc-100 px-2 py-0.5 text-xs dark:bg-zinc-800">
+                          archived
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5">{formatDateTime(doc.uploaded_at)}</td>
+                      <td className="px-4 py-2.5">
+                        <span className="flex flex-wrap gap-1.5">
+                          {doc.used_by.map((job) => (
+                            <Link
+                              key={job.id}
+                              href={`/jobs/${job.id}`}
+                              className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+                            >
+                              {job.company} — {job.title}
+                            </Link>
+                          ))}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <button onClick={() => void restore(doc)} className="text-xs text-blue-600 hover:underline dark:text-blue-400">
+                          restore
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
