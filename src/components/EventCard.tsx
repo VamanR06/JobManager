@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { statusLabel, type Recording, type StatusEvent } from "@/lib/types";
-import { formatDateTime, formatSeconds, fromDatetimeLocal, toDatetimeLocal } from "@/lib/format";
+import { formatDateTime, formatElapsed, formatSeconds, fromDatetimeLocal, toDatetimeLocal } from "@/lib/format";
 import StatusBadge from "./StatusBadge";
 import RecorderControls from "./RecorderControls";
 
@@ -41,6 +41,22 @@ export default function EventCard({ event, pendingAfter, recordings }: Props) {
     "w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900/50";
   const isInterview = event.status === "interview";
   const isOa = event.status === "oa";
+
+  // Editable milestone date: patches the field on change; blank clears it.
+  const dateField = (field: keyof StatusEvent, label: string) => {
+    const current = event[field] as string | null;
+    return (
+      <label className="flex flex-col gap-1 text-xs text-zinc-500">
+        {label}
+        <input
+          type="datetime-local"
+          defaultValue={current ? toDatetimeLocal(current) : ""}
+          onChange={(e) => void patch({ [field]: fromDatetimeLocal(e.target.value) })}
+          className="rounded border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+        />
+      </label>
+    );
+  };
 
   return (
     <div className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800 space-y-3">
@@ -82,16 +98,27 @@ export default function EventCard({ event, pendingAfter, recordings }: Props) {
       </div>
 
       {isOa && (
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-zinc-500">Score:</span>
-          <input
-            value={oaScore}
-            onChange={(e) => setOaScore(e.target.value)}
-            onBlur={() => oaScore !== (event.oa_score ?? "") && void patch({ oa_score: oaScore || null })}
-            placeholder="e.g. 3/4 or 270"
-            className="w-32 rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          />
-        </label>
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-zinc-500">Score:</span>
+            <input
+              value={oaScore}
+              onChange={(e) => setOaScore(e.target.value)}
+              onBlur={() => oaScore !== (event.oa_score ?? "") && void patch({ oa_score: oaScore || null })}
+              placeholder="e.g. 3/4 or 270"
+              className="w-32 rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            />
+          </label>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {dateField("oa_sent_at", "OA sent to me")}
+            {dateField("oa_submitted_at", "I submitted the OA")}
+          </div>
+          {event.oa_sent_at && event.oa_submitted_at && (
+            <p className="text-xs text-zinc-400">
+              Turnaround: {formatElapsed(event.oa_sent_at, event.oa_submitted_at)}
+            </p>
+          )}
+        </div>
       )}
 
       {isInterview && (
@@ -113,6 +140,15 @@ export default function EventCard({ event, pendingAfter, recordings }: Props) {
               <RecorderControls eventId={event.id} />
             </span>
           </label>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {dateField("interview_offered_at", "Interview offered")}
+            {dateField("interview_held_at", "Interview held")}
+          </div>
+          {event.interview_offered_at && event.interview_held_at && (
+            <p className="text-xs text-zinc-400">
+              Wait: {formatElapsed(event.interview_offered_at, event.interview_held_at)}
+            </p>
+          )}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div>
               <p className="mb-1 text-xs font-medium text-zinc-500">Pre-interview notes</p>

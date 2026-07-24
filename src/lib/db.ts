@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS status_events (
   status TEXT NOT NULL CHECK (status IN ('applied','oa','interview','pending','rejected','accepted')),
   interview_round INTEGER,
   oa_score TEXT,
+  oa_sent_at TEXT,
+  oa_submitted_at TEXT,
+  interview_offered_at TEXT,
+  interview_held_at TEXT,
   pre_notes TEXT NOT NULL DEFAULT '',
   post_notes TEXT NOT NULL DEFAULT '',
   occurred_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
@@ -82,6 +86,11 @@ function open(): Database.Database {
   const docCols = (db.prepare("PRAGMA table_info(documents)").all() as { name: string }[]).map((c) => c.name);
   if (!docCols.includes("archived")) {
     db.exec("ALTER TABLE documents ADD COLUMN archived INTEGER NOT NULL DEFAULT 0");
+  }
+  // Migration: milestone dates on OA/interview events (sent/submitted, offered/held).
+  const evCols = (db.prepare("PRAGMA table_info(status_events)").all() as { name: string }[]).map((c) => c.name);
+  for (const col of ["oa_sent_at", "oa_submitted_at", "interview_offered_at", "interview_held_at"]) {
+    if (!evCols.includes(col)) db.exec(`ALTER TABLE status_events ADD COLUMN ${col} TEXT`);
   }
   // Sweep recordings orphaned by a server restart mid-recording.
   db.prepare("UPDATE recordings SET state = 'failed' WHERE state = 'recording'").run();

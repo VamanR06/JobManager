@@ -34,6 +34,10 @@ export interface StatusEvent {
   status: Status;
   interview_round: number | null;
   oa_score: string | null;
+  oa_sent_at: string | null;
+  oa_submitted_at: string | null;
+  interview_offered_at: string | null;
+  interview_held_at: string | null;
   pre_notes: string;
   post_notes: string;
   occurred_at: string;

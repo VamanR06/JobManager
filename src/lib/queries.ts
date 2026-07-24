@@ -85,41 +85,55 @@ export function createEvent(input: {
   status: Status;
   interview_round?: number | null;
   oa_score?: string | null;
+  oa_sent_at?: string | null;
+  oa_submitted_at?: string | null;
+  interview_offered_at?: string | null;
+  interview_held_at?: string | null;
   pre_notes?: string;
   post_notes?: string;
   occurred_at?: string | null;
 }): StatusEvent {
   const res = getDb()
     .prepare(
-      `INSERT INTO status_events (job_id, status, interview_round, oa_score, pre_notes, post_notes, occurred_at)
-       VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ','now')))`
+      `INSERT INTO status_events
+         (job_id, status, interview_round, oa_score, oa_sent_at, oa_submitted_at,
+          interview_offered_at, interview_held_at, pre_notes, post_notes, occurred_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ','now')))`
     )
     .run(
       input.job_id, input.status, input.interview_round ?? null, input.oa_score ?? null,
+      input.oa_sent_at ?? null, input.oa_submitted_at ?? null,
+      input.interview_offered_at ?? null, input.interview_held_at ?? null,
       input.pre_notes ?? "", input.post_notes ?? "", input.occurred_at ?? null
     );
   return getEvent(Number(res.lastInsertRowid))!;
 }
 
+const EVENT_UPDATE_FIELDS = [
+  "status", "interview_round", "oa_score", "oa_sent_at", "oa_submitted_at",
+  "interview_offered_at", "interview_held_at", "pre_notes", "post_notes", "occurred_at",
+] as const;
+
 export function updateEvent(
   id: number,
-  input: Partial<Pick<StatusEvent, "status" | "interview_round" | "oa_score" | "pre_notes" | "post_notes" | "occurred_at">>
+  input: Partial<Pick<StatusEvent, (typeof EVENT_UPDATE_FIELDS)[number]>>
 ): StatusEvent | null {
   const ev = getEvent(id);
   if (!ev) return null;
+  // Only overwrite fields the caller explicitly provided; leave the rest untouched.
+  const merged = { ...ev, ...Object.fromEntries(
+    EVENT_UPDATE_FIELDS.filter((f) => input[f] !== undefined).map((f) => [f, input[f]])
+  ) };
   getDb()
     .prepare(
-      `UPDATE status_events SET status = ?, interview_round = ?, oa_score = ?, pre_notes = ?, post_notes = ?, occurred_at = ?
-       WHERE id = ?`
+      `UPDATE status_events SET status = ?, interview_round = ?, oa_score = ?, oa_sent_at = ?,
+         oa_submitted_at = ?, interview_offered_at = ?, interview_held_at = ?,
+         pre_notes = ?, post_notes = ?, occurred_at = ? WHERE id = ?`
     )
     .run(
-      input.status ?? ev.status,
-      input.interview_round !== undefined ? input.interview_round : ev.interview_round,
-      input.oa_score !== undefined ? input.oa_score : ev.oa_score,
-      input.pre_notes ?? ev.pre_notes,
-      input.post_notes ?? ev.post_notes,
-      input.occurred_at ?? ev.occurred_at,
-      id
+      merged.status, merged.interview_round, merged.oa_score, merged.oa_sent_at,
+      merged.oa_submitted_at, merged.interview_offered_at, merged.interview_held_at,
+      merged.pre_notes, merged.post_notes, merged.occurred_at, id
     );
   return getEvent(id);
 }
