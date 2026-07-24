@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { statusLabel, type Recording, type StatusEvent } from "@/lib/types";
-import { formatDateTime, formatElapsed, formatSeconds, fromDatetimeLocal, toDatetimeLocal } from "@/lib/format";
+import { formatDateTime, formatSeconds, fromDatetimeLocal, toDatetimeLocal } from "@/lib/format";
 import StatusBadge from "./StatusBadge";
 import RecorderControls from "./RecorderControls";
 
@@ -113,11 +113,6 @@ export default function EventCard({ event, pendingAfter, recordings }: Props) {
             {dateField("oa_sent_at", "OA sent to me")}
             {dateField("oa_submitted_at", "I submitted the OA")}
           </div>
-          {event.oa_sent_at && event.oa_submitted_at && (
-            <p className="text-xs text-zinc-400">
-              Turnaround: {formatElapsed(event.oa_sent_at, event.oa_submitted_at)}
-            </p>
-          )}
         </div>
       )}
 
@@ -144,11 +139,6 @@ export default function EventCard({ event, pendingAfter, recordings }: Props) {
             {dateField("interview_offered_at", "Interview offered")}
             {dateField("interview_held_at", "Interview held")}
           </div>
-          {event.interview_offered_at && event.interview_held_at && (
-            <p className="text-xs text-zinc-400">
-              Wait: {formatElapsed(event.interview_offered_at, event.interview_held_at)}
-            </p>
-          )}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div>
               <p className="mb-1 text-xs font-medium text-zinc-500">Pre-interview notes</p>

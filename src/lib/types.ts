@@ -72,6 +72,25 @@ export interface JobWithStatus extends Job {
   pending_after: StatusEvent | null;
 }
 
+/**
+ * The precise start/end of a stage, for computing gaps *between* stages.
+ * OA: starts when the OA was sent, ends when it was submitted.
+ * Interview: starts when it was offered, ends when it was held.
+ * Falls back to the event's logged timestamp when a milestone date isn't set.
+ */
+export function stageWindow(event: StatusEvent): { start: string; end: string } {
+  if (event.status === "oa") {
+    return { start: event.oa_sent_at ?? event.occurred_at, end: event.oa_submitted_at ?? event.occurred_at };
+  }
+  if (event.status === "interview") {
+    return {
+      start: event.interview_offered_at ?? event.occurred_at,
+      end: event.interview_held_at ?? event.occurred_at,
+    };
+  }
+  return { start: event.occurred_at, end: event.occurred_at };
+}
+
 /** Human label for a status event, e.g. "Interview R2" or "Pending — after OA". */
 export function statusLabel(event: StatusEvent | null, pendingAfter: StatusEvent | null): string {
   if (!event) return "No status";

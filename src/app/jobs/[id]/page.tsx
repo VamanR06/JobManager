@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getJob, getPosting, listDocuments, listEvents, listRecordings, pendingAfter } from "@/lib/queries";
 import { formatElapsed } from "@/lib/format";
+import { stageWindow } from "@/lib/types";
 import JobHeader from "@/components/JobHeader";
 import PostingSection from "@/components/PostingSection";
 import AddEventForm from "@/components/AddEventForm";
@@ -47,7 +48,9 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
               {next && (
                 <div className="flex items-center gap-2 py-1 pl-6 text-xs text-zinc-400">
                   <span>↑</span>
-                  <span>{formatElapsed(next.occurred_at, event.occurred_at)} later</span>
+                  <span>
+                    {formatElapsed(stageWindow(next).end, stageWindow(event).start)} later
+                  </span>
                 </div>
               )}
             </div>
