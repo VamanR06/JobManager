@@ -87,8 +87,11 @@ export function createEvent(input: {
   oa_score?: string | null;
   oa_sent_at?: string | null;
   oa_submitted_at?: string | null;
+  oa_deadline_at?: string | null;
+  oa_link?: string | null;
   interview_offered_at?: string | null;
   interview_held_at?: string | null;
+  interview_link?: string | null;
   pre_notes?: string;
   post_notes?: string;
   occurred_at?: string | null;
@@ -96,22 +99,22 @@ export function createEvent(input: {
   const res = getDb()
     .prepare(
       `INSERT INTO status_events
-         (job_id, status, interview_round, oa_score, oa_sent_at, oa_submitted_at,
-          interview_offered_at, interview_held_at, pre_notes, post_notes, occurred_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ','now')))`
+         (job_id, status, interview_round, oa_score, oa_sent_at, oa_submitted_at, oa_deadline_at, oa_link,
+          interview_offered_at, interview_held_at, interview_link, pre_notes, post_notes, occurred_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, strftime('%Y-%m-%dT%H:%M:%fZ','now')))`
     )
     .run(
       input.job_id, input.status, input.interview_round ?? null, input.oa_score ?? null,
-      input.oa_sent_at ?? null, input.oa_submitted_at ?? null,
-      input.interview_offered_at ?? null, input.interview_held_at ?? null,
+      input.oa_sent_at ?? null, input.oa_submitted_at ?? null, input.oa_deadline_at ?? null, input.oa_link ?? null,
+      input.interview_offered_at ?? null, input.interview_held_at ?? null, input.interview_link ?? null,
       input.pre_notes ?? "", input.post_notes ?? "", input.occurred_at ?? null
     );
   return getEvent(Number(res.lastInsertRowid))!;
 }
 
 const EVENT_UPDATE_FIELDS = [
-  "status", "interview_round", "oa_score", "oa_sent_at", "oa_submitted_at",
-  "interview_offered_at", "interview_held_at", "pre_notes", "post_notes", "occurred_at",
+  "status", "interview_round", "oa_score", "oa_sent_at", "oa_submitted_at", "oa_deadline_at", "oa_link",
+  "interview_offered_at", "interview_held_at", "interview_link", "pre_notes", "post_notes", "occurred_at",
 ] as const;
 
 export function updateEvent(
@@ -127,12 +130,14 @@ export function updateEvent(
   getDb()
     .prepare(
       `UPDATE status_events SET status = ?, interview_round = ?, oa_score = ?, oa_sent_at = ?,
-         oa_submitted_at = ?, interview_offered_at = ?, interview_held_at = ?,
+         oa_submitted_at = ?, oa_deadline_at = ?, oa_link = ?,
+         interview_offered_at = ?, interview_held_at = ?, interview_link = ?,
          pre_notes = ?, post_notes = ?, occurred_at = ? WHERE id = ?`
     )
     .run(
       merged.status, merged.interview_round, merged.oa_score, merged.oa_sent_at,
-      merged.oa_submitted_at, merged.interview_offered_at, merged.interview_held_at,
+      merged.oa_submitted_at, merged.oa_deadline_at, merged.oa_link,
+      merged.interview_offered_at, merged.interview_held_at, merged.interview_link,
       merged.pre_notes, merged.post_notes, merged.occurred_at, id
     );
   return getEvent(id);

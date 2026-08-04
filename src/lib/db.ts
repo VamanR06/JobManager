@@ -24,8 +24,11 @@ CREATE TABLE IF NOT EXISTS status_events (
   oa_score TEXT,
   oa_sent_at TEXT,
   oa_submitted_at TEXT,
+  oa_deadline_at TEXT,
+  oa_link TEXT,
   interview_offered_at TEXT,
   interview_held_at TEXT,
+  interview_link TEXT,
   pre_notes TEXT NOT NULL DEFAULT '',
   post_notes TEXT NOT NULL DEFAULT '',
   occurred_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
@@ -89,7 +92,10 @@ function open(): Database.Database {
   }
   // Migration: milestone dates on OA/interview events (sent/submitted, offered/held).
   const evCols = (db.prepare("PRAGMA table_info(status_events)").all() as { name: string }[]).map((c) => c.name);
-  for (const col of ["oa_sent_at", "oa_submitted_at", "interview_offered_at", "interview_held_at"]) {
+  for (const col of [
+    "oa_sent_at", "oa_submitted_at", "oa_deadline_at", "oa_link",
+    "interview_offered_at", "interview_held_at", "interview_link",
+  ]) {
     if (!evCols.includes(col)) db.exec(`ALTER TABLE status_events ADD COLUMN ${col} TEXT`);
   }
   // Sweep recordings orphaned by a server restart mid-recording.

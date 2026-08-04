@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { statusLabel, type Recording, type StatusEvent } from "@/lib/types";
 import { formatDateTime, formatSeconds, fromDatetimeLocal, toDatetimeLocal } from "@/lib/format";
@@ -13,14 +13,62 @@ interface Props {
   recordings: Recording[];
 }
 
+const AUTOSAVE_DELAY = 600;
+
 export default function EventCard({ event, pendingAfter, recordings }: Props) {
   const router = useRouter();
   const [preNotes, setPreNotes] = useState(event.pre_notes);
   const [postNotes, setPostNotes] = useState(event.post_notes);
   const [oaScore, setOaScore] = useState(event.oa_score ?? "");
+  const [oaLink, setOaLink] = useState(event.oa_link ?? "");
+  const [interviewLink, setInterviewLink] = useState(event.interview_link ?? "");
   const [round, setRound] = useState(event.interview_round?.toString() ?? "");
-  const [editingTime, setEditingTime] = useState(false);
-  const [timeValue, setTimeValue] = useState(toDatetimeLocal(event.occurred_at));
+  const pending = useRef<Record<string, unknown>>({});
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  /**
+   * Send whatever's pending right now. Uses keepalive so the request still lands
+   * even if the browser is mid-unload (refresh/close) — otherwise a debounced
+   * save queued right before a refresh never gets a chance to fire.
+   */
+  function flush() {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    const fields = pending.current;
+    if (Object.keys(fields).length === 0) return;
+    pending.current = {};
+    fetch(`/api/events/${event.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+      keepalive: true,
+    }).then(() => router.refresh());
+  }
+
+  /** Queue `field` to save a short pause after the user stops typing. */
+  function autosave(field: string, value: unknown) {
+    pending.current[field] = value;
+    setSaved(false);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      flush();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1200);
+    }, AUTOSAVE_DELAY);
+  }
+
+  // Flush on tab close/refresh and on unmount, so nothing typed is ever lost.
+  useEffect(() => {
+    window.addEventListener("beforeunload", flush);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("beforeunload", flush);
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function patch(fields: Record<string, unknown>) {
     await fetch(`/api/events/${event.id}`, {
@@ -42,7 +90,7 @@ export default function EventCard({ event, pendingAfter, recordings }: Props) {
   const isInterview = event.status === "interview";
   const isOa = event.status === "oa";
 
-  // Editable milestone date: patches the field on change; blank clears it.
+  // Milestone date: saves immediately on change (a single discrete pick, no debounce needed).
   const dateField = (field: keyof StatusEvent, label: string) => {
     const current = event[field] as string | null;
     return (
@@ -62,36 +110,15 @@ export default function EventCard({ event, pendingAfter, recordings }: Props) {
     <div className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800 space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge status={event.status} label={statusLabel(event, pendingAfter)} />
-        {editingTime ? (
-          <span className="inline-flex items-center gap-1">
-            <input
-              type="datetime-local"
-              value={timeValue}
-              onChange={(e) => setTimeValue(e.target.value)}
-              className="rounded border border-zinc-300 bg-white px-2 py-0.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"
-            />
-            <button
-              onClick={() => {
-                setEditingTime(false);
-                void patch({ occurred_at: fromDatetimeLocal(timeValue) });
-              }}
-              className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white"
-            >
-              ✓
-            </button>
-            <button onClick={() => setEditingTime(false)} className="px-1 text-xs text-zinc-500">
-              ✕
-            </button>
-          </span>
-        ) : (
-          <button
-            onClick={() => setEditingTime(true)}
-            title="Edit timestamp"
-            className="text-xs text-zinc-500 hover:underline"
-          >
-            {formatDateTime(event.occurred_at)}
-          </button>
-        )}
+        <label className="text-xs text-zinc-500">
+          <input
+            type="datetime-local"
+            defaultValue={toDatetimeLocal(event.occurred_at)}
+            onChange={(e) => void patch({ occurred_at: fromDatetimeLocal(e.target.value) })}
+            className="rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-zinc-300 dark:hover:border-zinc-700"
+          />
+        </label>
+        {saved && <span className="text-xs text-green-600 dark:text-green-400">saved</span>}
         <button onClick={remove} className="ml-auto text-xs text-zinc-400 hover:text-red-500">
           delete
         </button>
@@ -103,8 +130,11 @@ export default function EventCard({ event, pendingAfter, recordings }: Props) {
             <span className="text-zinc-500">Score:</span>
             <input
               value={oaScore}
-              onChange={(e) => setOaScore(e.target.value)}
-              onBlur={() => oaScore !== (event.oa_score ?? "") && void patch({ oa_score: oaScore || null })}
+              onChange={(e) => {
+                setOaScore(e.target.value);
+                autosave("oa_score", e.target.value || null);
+              }}
+              onBlur={flush}
               placeholder="e.g. 3/4 or 270"
               className="w-32 rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
             />
@@ -112,7 +142,27 @@ export default function EventCard({ event, pendingAfter, recordings }: Props) {
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {dateField("oa_sent_at", "OA sent to me")}
             {dateField("oa_submitted_at", "I submitted the OA")}
+            {dateField("oa_deadline_at", "Deadline (optional)")}
+            <label className="flex flex-col gap-1 text-xs text-zinc-500">
+              OA link
+              <input
+                type="url"
+                value={oaLink}
+                onChange={(e) => {
+                  setOaLink(e.target.value);
+                  autosave("oa_link", e.target.value || null);
+                }}
+                onBlur={flush}
+                placeholder="https://…"
+                className="rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
           </div>
+          {event.oa_link && (
+            <a href={event.oa_link} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline dark:text-blue-400">
+              Open OA ↗
+            </a>
+          )}
         </div>
       )}
 
@@ -124,11 +174,11 @@ export default function EventCard({ event, pendingAfter, recordings }: Props) {
               type="number"
               min={1}
               value={round}
-              onChange={(e) => setRound(e.target.value)}
-              onBlur={() =>
-                round !== (event.interview_round?.toString() ?? "") &&
-                void patch({ interview_round: round ? Number(round) : null })
-              }
+              onChange={(e) => {
+                setRound(e.target.value);
+                autosave("interview_round", e.target.value ? Number(e.target.value) : null);
+              }}
+              onBlur={flush}
               className="w-20 rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
             />
             <span className="ml-auto">
@@ -138,14 +188,36 @@ export default function EventCard({ event, pendingAfter, recordings }: Props) {
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {dateField("interview_offered_at", "Interview offered")}
             {dateField("interview_held_at", "Interview held")}
+            <label className="flex flex-col gap-1 text-xs text-zinc-500 sm:col-span-2">
+              Meeting link
+              <input
+                type="url"
+                value={interviewLink}
+                onChange={(e) => {
+                  setInterviewLink(e.target.value);
+                  autosave("interview_link", e.target.value || null);
+                }}
+                onBlur={flush}
+                placeholder="https://…"
+                className="rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
           </div>
+          {event.interview_link && (
+            <a href={event.interview_link} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline dark:text-blue-400">
+              Join meeting ↗
+            </a>
+          )}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div>
               <p className="mb-1 text-xs font-medium text-zinc-500">Pre-interview notes</p>
               <textarea
                 value={preNotes}
-                onChange={(e) => setPreNotes(e.target.value)}
-                onBlur={() => preNotes !== event.pre_notes && void patch({ pre_notes: preNotes })}
+                onChange={(e) => {
+                  setPreNotes(e.target.value);
+                  autosave("pre_notes", e.target.value);
+                }}
+                onBlur={flush}
                 rows={4}
                 placeholder="Prep, topics to review, questions to ask…"
                 className={noteCls}
@@ -155,8 +227,11 @@ export default function EventCard({ event, pendingAfter, recordings }: Props) {
               <p className="mb-1 text-xs font-medium text-zinc-500">Post-interview notes</p>
               <textarea
                 value={postNotes}
-                onChange={(e) => setPostNotes(e.target.value)}
-                onBlur={() => postNotes !== event.post_notes && void patch({ post_notes: postNotes })}
+                onChange={(e) => {
+                  setPostNotes(e.target.value);
+                  autosave("post_notes", e.target.value);
+                }}
+                onBlur={flush}
                 rows={4}
                 placeholder="How it went, questions asked, follow-ups…"
                 className={noteCls}
