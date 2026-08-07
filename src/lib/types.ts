@@ -20,7 +20,32 @@ export interface AppDocument {
   name: string;
   file_path: string;
   archived: 0 | 1;
+  /** 1 when produced by the resume generator rather than uploaded by hand. */
+  generated: 0 | 1;
+  /** The job whose posting this was tailored from, when generated. */
+  source_job_id: number | null;
+  /** The ChatGPT conversation behind a generated resume, for revisions. */
+  thread_id: string | null;
   uploaded_at: string;
+}
+
+/** One run of the resume generator, kept as history even when it fails. */
+export interface Generation {
+  id: number;
+  job_id: number | null;
+  document_id: number | null;
+  input_md: string;
+  response_text: string;
+  state: "pending" | "done" | "failed";
+  error: string | null;
+  created_at: string;
+}
+
+/** A generation plus the job/document it resolved to, for the history table. */
+export interface GenerationWithRefs extends Generation {
+  company: string | null;
+  title: string | null;
+  document_name: string | null;
 }
 
 /** Document plus the jobs it's linked to (for the documents pages). */

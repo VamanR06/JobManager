@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getJob, getPosting, listDocuments, listEvents, listRecordings, pendingAfter } from "@/lib/queries";
+import {
+  getDocument, getJob, getPosting, listDocuments, listEvents, listRecordings, pendingAfter,
+} from "@/lib/queries";
 import { formatElapsed } from "@/lib/format";
 import { stageWindow } from "@/lib/types";
 import JobHeader from "@/components/JobHeader";
 import PostingSection from "@/components/PostingSection";
+import ResumePreview from "@/components/ResumePreview";
 import AddEventForm from "@/components/AddEventForm";
 import EventCard from "@/components/EventCard";
 
@@ -17,6 +20,9 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
 
   const events = listEvents(id); // newest first
   const posting = getPosting(id);
+  // Only generated resumes can be previewed/revised — uploads have no conversation.
+  const linkedResume = job.resume_id ? getDocument(job.resume_id) : null;
+  const generatedResume = linkedResume?.generated ? linkedResume : null;
   const nextRound = events
     .filter((e) => e.status === "interview")
     .reduce((max, e) => Math.max(max, e.interview_round ?? 0), 0) + 1;
@@ -29,6 +35,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
 
       <JobHeader job={job} resumes={listDocuments("resume")} coverLetters={listDocuments("cover_letter")} />
       <PostingSection jobId={id} posting={posting} hasUrl={!!job.url} />
+      {generatedResume && <ResumePreview document={generatedResume} />}
 
       <section className="space-y-1">
         <h2 className="text-sm font-semibold">Status timeline</h2>

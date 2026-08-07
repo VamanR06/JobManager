@@ -54,6 +54,18 @@ CREATE TABLE IF NOT EXISTS documents (
   uploaded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
+CREATE TABLE IF NOT EXISTS generations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+  document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  input_md TEXT NOT NULL DEFAULT '',
+  response_text TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','done','failed')),
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_generations_created ON generations(created_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS postings (
   job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
   title TEXT,
@@ -98,6 +110,21 @@ function open(): Database.Database {
   ]) {
     if (!evCols.includes(col)) db.exec(`ALTER TABLE status_events ADD COLUMN ${col} TEXT`);
   }
+  // Migration: mark documents produced by the resume generator, and remember
+  // which posting they were tailored from.
+  if (!docCols.includes("generated")) {
+    db.exec("ALTER TABLE documents ADD COLUMN generated INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!docCols.includes("source_job_id")) {
+    db.exec("ALTER TABLE documents ADD COLUMN source_job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL");
+  }
+  // The ChatGPT conversation a generated resume came from, so it can be revised
+  // in context rather than regenerated from scratch.
+  if (!docCols.includes("thread_id")) {
+    db.exec("ALTER TABLE documents ADD COLUMN thread_id TEXT");
+  }
+  // Sweep generations orphaned by a server restart mid-request.
+  db.prepare("UPDATE generations SET state = 'failed', error = 'Interrupted by server restart' WHERE state = 'pending'").run();
   // Sweep recordings orphaned by a server restart mid-recording.
   db.prepare("UPDATE recordings SET state = 'failed' WHERE state = 'recording'").run();
   return db;

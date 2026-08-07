@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "start:all": "bash scripts/start-all.sh",
     "build": "next build",
     "start": "next start",
     "build:recorder": "mkdir -p bin && swiftc -O -o bin/JobRecorder recorder/JobRecorder.swift"

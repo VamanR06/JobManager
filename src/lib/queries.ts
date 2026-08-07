@@ -1,6 +1,7 @@
 import { getDb } from "./db";
 import type {
-  AppDocument, DocumentKind, DocumentWithUsage, Job, JobWithStatus, Posting, Recording, Status, StatusEvent,
+  AppDocument, DocumentKind, DocumentWithUsage, Generation, GenerationWithRefs, Job, JobWithStatus,
+  Posting, Recording, Status, StatusEvent,
 } from "./types";
 
 // ---------- jobs ----------
@@ -201,11 +202,32 @@ export function getDocument(id: number): AppDocument | null {
   return (getDb().prepare("SELECT * FROM documents WHERE id = ?").get(id) as AppDocument | undefined) ?? null;
 }
 
-export function createDocument(kind: DocumentKind, name: string, filePath: string): AppDocument {
+export function createDocument(
+  kind: DocumentKind,
+  name: string,
+  filePath: string,
+  /** Set when the resume generator produced this file rather than an upload. */
+  origin?: { generated: boolean; source_job_id: number | null; thread_id?: string | null }
+): AppDocument {
   const res = getDb()
-    .prepare("INSERT INTO documents (kind, name, file_path) VALUES (?, ?, ?)")
-    .run(kind, name, filePath);
+    .prepare(
+      `INSERT INTO documents (kind, name, file_path, generated, source_job_id, thread_id)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      kind, name, filePath, origin?.generated ? 1 : 0,
+      origin?.source_job_id ?? null, origin?.thread_id ?? null
+    );
   return getDocument(Number(res.lastInsertRowid))!;
+}
+
+/**
+ * Point a generated document at a new conversation after a revision.
+ * The file itself is overwritten in place, so the path and name don't change.
+ */
+export function setDocumentThread(id: number, threadId: string | null): AppDocument | null {
+  getDb().prepare("UPDATE documents SET thread_id = ? WHERE id = ?").run(threadId, id);
+  return getDocument(id);
 }
 
 export function renameDocument(id: number, name: string): AppDocument | null {
@@ -258,4 +280,43 @@ export function upsertPosting(input: {
       input.description_md, input.source, input.fetch_status
     );
   return getPosting(input.job_id)!;
+}
+
+// ---------- resume generations ----------
+
+export function getGeneration(id: number): Generation | null {
+  return (getDb().prepare("SELECT * FROM generations WHERE id = ?").get(id) as Generation | undefined) ?? null;
+}
+
+/** Recent runs, newest first, joined to the job and document they resolved to. */
+export function listGenerations(limit = 20): GenerationWithRefs[] {
+  return getDb()
+    .prepare(
+      `SELECT g.*, j.company, j.title, d.name AS document_name
+       FROM generations g
+       LEFT JOIN jobs j ON j.id = g.job_id
+       LEFT JOIN documents d ON d.id = g.document_id
+       ORDER BY g.created_at DESC, g.id DESC
+       LIMIT ?`
+    )
+    .all(limit) as GenerationWithRefs[];
+}
+
+export function createGeneration(jobId: number | null, inputMd: string): Generation {
+  const res = getDb()
+    .prepare("INSERT INTO generations (job_id, input_md) VALUES (?, ?)")
+    .run(jobId, inputMd);
+  return getGeneration(Number(res.lastInsertRowid))!;
+}
+
+export function finishGeneration(
+  id: number,
+  input: { state: "done" | "failed"; document_id?: number | null; response_text?: string; error?: string | null }
+): Generation | null {
+  getDb()
+    .prepare(
+      `UPDATE generations SET state = ?, document_id = ?, response_text = ?, error = ? WHERE id = ?`
+    )
+    .run(input.state, input.document_id ?? null, input.response_text ?? "", input.error ?? null, id);
+  return getGeneration(id);
 }

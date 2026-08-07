@@ -12,7 +12,9 @@ export default function PostingSection({ jobId, posting, hasUrl }: { jobId: numb
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(posting?.description_md ?? "");
   const [busy, setBusy] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
   async function refetch() {
     setBusy(true);
@@ -53,6 +55,28 @@ export default function PostingSection({ jobId, posting, hasUrl }: { jobId: numb
     }
   }
 
+  /** Runs the saved description through the Custom GPT and links the result. */
+  async function generate() {
+    setGenerating(true);
+    setError(null);
+    setWarning(null);
+    try {
+      const res = await fetch("/api/generate-resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_id: jobId }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "Generation failed");
+      if (body.warning) setWarning(body.warning);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   const hasContent = !!posting?.description_md;
 
   return (
@@ -70,6 +94,16 @@ export default function PostingSection({ jobId, posting, hasUrl }: { jobId: numb
           </span>
         )}
         <span className="ml-auto flex gap-2">
+          {hasContent && (
+            <button
+              onClick={generate}
+              disabled={generating}
+              title="Send this description to your Resume Builder GPT"
+              className="text-xs text-blue-600 hover:underline disabled:opacity-50 dark:text-blue-400"
+            >
+              {generating ? "Generating… (~1 min)" : "Generate resume"}
+            </button>
+          )}
           {hasUrl && (
             <button
               onClick={refetch}
@@ -92,6 +126,7 @@ export default function PostingSection({ jobId, posting, hasUrl }: { jobId: numb
         </span>
       </div>
       {error && <p className="px-4 pb-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
+      {warning && <p className="px-4 pb-2 text-xs text-amber-600 dark:text-amber-400">{warning}</p>}
 
       {open && (
         <div className="border-t border-zinc-100 px-4 py-4 dark:border-zinc-800">

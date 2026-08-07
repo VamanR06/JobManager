@@ -7,6 +7,7 @@ const TABS = [
   { href: "/", label: "Applications" },
   { href: "/resumes", label: "Resumes" },
   { href: "/cover-letters", label: "Cover Letters" },
+  { href: "/generate", label: "Generate" },
 ];
 
 export default function NavTabs() {
