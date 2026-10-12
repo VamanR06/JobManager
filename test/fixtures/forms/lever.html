@@ -1,0 +1,36 @@
+<!doctype html><html><head><title>Lever-style application</title></head><body>
+<form id="application-form" method="POST" action="/submit">
+  <ul>
+    <li class="application-question">
+      <div class="application-label">Resume/CV <span class="required">✱</span></div>
+      <input type="file" name="resume" id="resume-upload-input">
+      <span class="filename" id="resume-name"></span>
+    </li>
+    <li class="application-question"><div class="application-label">Full name<span>✱</span></div><input type="text" name="name" required></li>
+    <li class="application-question"><div class="application-label">Email<span>✱</span></div><input type="email" name="email" required></li>
+    <li class="application-question"><div class="application-label">Phone ✱</div><input type="text" name="phone" required></li>
+    <li class="application-question"><div class="application-label">Current location ✱</div><input type="text" name="location" required></li>
+    <li class="application-question"><div class="application-label">Current company ✱</div><input type="text" name="org" required></li>
+    <li class="application-question"><div class="application-label">LinkedIn URL</div><input type="text" name="urls[LinkedIn]"></li>
+    <li class="application-question"><div class="application-label">Twitter URL</div><input type="text" name="urls[Twitter]"></li>
+    <li class="application-question"><div class="application-label">How did you hear about Xcimer? ✱</div>
+      <select name="cards[a][field0]" required><option value="">Select...</option><option>Job board</option><option>Career fair</option><option>Referral</option></select></li>
+    <li class="application-question"><div class="application-label">Why do you want to work at Xcimer? ✱</div><textarea name="cards[a][field1]" required></textarea></li>
+    <li class="application-question"><div class="application-label">Gender</div>
+      <select name="eeo[gender]"><option value="">Select ...</option><option>Male</option><option>Female</option><option>Decline to self-identify</option></select></li>
+    <li class="application-question"><div class="application-label">Age range</div>
+      <label><input type="radio" name="survey[age]" value="18-20">18-20</label>
+      <label><input type="radio" name="survey[age]" value="21-29">21-29</label></li>
+    <li class="application-question"><label><input type="checkbox" name="consent" value="yes" required> I certify that the information above is accurate ✱</label></li>
+  </ul>
+  <button type="submit" id="btn-submit">Submit application</button>
+</form>
+<script>
+  // Simulates Lever's resume parser: it fills "name" from the resume a while after
+  // upload, i.e. after the automation has already typed the verified name.
+  document.getElementById("resume-upload-input").addEventListener("change", (e) => {
+    document.getElementById("resume-name").textContent = e.target.files[0].name;
+    setTimeout(() => { document.querySelector("[name=name]").value = "PARSED NAME FROM RESUME"; }, 1200);
+  });
+</script>
+</body></html>

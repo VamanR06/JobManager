@@ -7,11 +7,13 @@ const TABS = [
   { href: "/", label: "Applications" },
   { href: "/resumes", label: "Resumes" },
   { href: "/cover-letters", label: "Cover Letters" },
-  { href: "/generate", label: "Generate" },
+  { href: "/queue", label: "Queue" },
+  { href: "/profile", label: "Profile" },
 ];
 
-export default function NavTabs() {
+export default function NavTabs({ showSignOut = false }: { showSignOut?: boolean }) {
   const pathname = usePathname();
+  if (pathname === "/login") return null;
   return (
     <nav className="border-b border-zinc-200 dark:border-zinc-800">
       <div className="mx-auto flex w-full max-w-5xl items-center gap-1 px-6">
@@ -32,6 +34,13 @@ export default function NavTabs() {
             </Link>
           );
         })}
+        {showSignOut && (
+          <form method="post" action="/api/auth/logout" className="ml-auto">
+            <button type="submit" className="px-3 py-3 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
+              Sign out
+            </button>
+          </form>
+        )}
       </div>
     </nav>
   );

@@ -24,28 +24,12 @@ export interface AppDocument {
   generated: 0 | 1;
   /** The job whose posting this was tailored from, when generated. */
   source_job_id: number | null;
-  /** The ChatGPT conversation behind a generated resume, for revisions. */
+  /** Legacy: the ChatGPT conversation behind a resume from the removed gateway generator. */
   thread_id: string | null;
+  /** 1, 2, 3… among documents of the same kind and name, in upload order. */
+  version: number;
+  content_sha256: string | null;
   uploaded_at: string;
-}
-
-/** One run of the resume generator, kept as history even when it fails. */
-export interface Generation {
-  id: number;
-  job_id: number | null;
-  document_id: number | null;
-  input_md: string;
-  response_text: string;
-  state: "pending" | "done" | "failed";
-  error: string | null;
-  created_at: string;
-}
-
-/** A generation plus the job/document it resolved to, for the history table. */
-export interface GenerationWithRefs extends Generation {
-  company: string | null;
-  title: string | null;
-  document_name: string | null;
 }
 
 /** Document plus the jobs it's linked to (for the documents pages). */

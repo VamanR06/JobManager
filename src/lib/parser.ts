@@ -1,20 +1,23 @@
 import { Readability } from "@mozilla/readability";
 import { JSDOM, VirtualConsole } from "jsdom";
 import TurndownService from "turndown";
+import { safeFetch } from "./netguard";
 
 export interface ParsedPosting {
   title: string | null;
   company: string | null;
   location: string | null;
   description_md: string;
+  /** Extra JobPosting fields, when the page publishes them. */
+  employment_type?: string | null;
+  posting_id?: string | null;
+  /** ISO date after which the employer says the posting closes. */
+  valid_through?: string | null;
 }
-
-const USER_AGENT =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
 const turndown = new TurndownService({ headingStyle: "atx", bulletListMarker: "-" });
 
-function htmlToMarkdown(html: string): string {
+export function htmlToMarkdown(html: string): string {
   return turndown.turndown(html).trim();
 }
 
@@ -81,6 +84,14 @@ function fromJsonLd(doc: Document): ParsedPosting | null {
       company,
       location: extractLocation(posting),
       description_md: description ? htmlToMarkdown(description) : "",
+      employment_type: Array.isArray(posting.employmentType)
+        ? posting.employmentType.filter((t) => typeof t === "string").join(", ") || null
+        : str(posting.employmentType),
+      posting_id:
+        posting.identifier && typeof posting.identifier === "object"
+          ? str((posting.identifier as JsonLdNode).value) ?? (typeof (posting.identifier as JsonLdNode).value === "number" ? String((posting.identifier as JsonLdNode).value) : null)
+          : str(posting.identifier),
+      valid_through: str(posting.validThrough),
     };
   }
   return null;
@@ -101,24 +112,19 @@ function fromReadability(dom: JSDOM): ParsedPosting | null {
 
 // ---------- entry point ----------
 
-export async function parsePostingUrl(url: string): Promise<ParsedPosting> {
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": USER_AGENT,
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-    },
-    redirect: "follow",
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!res.ok) throw new Error(`Fetch failed: HTTP ${res.status}`);
-  const html = await res.text();
-
+/** JSON-LD first, Readability fallback. Also used by the automation extractor. */
+export function parsePostingHtml(html: string, url: string): ParsedPosting | null {
   // Silence jsdom's noisy CSS-parse errors from real-world pages.
   const virtualConsole = new VirtualConsole();
   const dom = new JSDOM(html, { url, virtualConsole });
+  return fromJsonLd(dom.window.document) ?? fromReadability(dom);
+}
 
-  const result = fromJsonLd(dom.window.document) ?? fromReadability(dom);
+export async function parsePostingUrl(url: string): Promise<ParsedPosting> {
+  // safeFetch refuses private/local hosts at every redirect hop.
+  const res = await safeFetch(url);
+  if (!res.ok) throw new Error(`Fetch failed: HTTP ${res.status}`);
+  const result = parsePostingHtml(res.body, res.finalUrl);
   if (!result || !result.description_md) throw new Error("Could not extract posting content");
   return result;
 }

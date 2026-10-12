@@ -48,3 +48,15 @@ export function toDatetimeLocal(iso: string): string {
 export function fromDatetimeLocal(value: string): string | null {
   return value ? new Date(value).toISOString() : null;
 }
+
+/**
+ * "Resume.pdf (v2)" — the version suffix appears once a name has more than one
+ * version among `all`, so v1 is distinguishable from its successors too.
+ */
+export function documentLabel(
+  doc: { name: string; version: number; kind?: string },
+  all: { name: string; version: number; kind?: string }[] = []
+): string {
+  const versioned = doc.version > 1 || all.some((d) => d.name === doc.name && d.kind === doc.kind && d.version !== doc.version);
+  return versioned ? `${doc.name} (v${doc.version})` : doc.name;
+}

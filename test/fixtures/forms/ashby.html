@@ -1,0 +1,29 @@
+<!doctype html><html><head><title>Ashby-style application</title>
+<style>.vh{position:absolute;opacity:0;width:14px;height:14px}.hidden{display:none}</style></head><body>
+<form method="POST" action="/submit">
+  <div class="_fieldEntry"><label for="_systemfield_name">Name *</label><input id="_systemfield_name" name="_systemfield_name" required></div>
+  <div class="_fieldEntry"><label for="_systemfield_email">Email *</label><input id="_systemfield_email" type="email" name="_systemfield_email" required></div>
+  <div class="_fieldEntry"><label for="phone">Phone</label><input id="phone" type="tel" name="phone"></div>
+  <div class="_fieldEntry"><label for="_systemfield_resume">Resume *</label><input id="_systemfield_resume" type="file" class="hidden" required>
+    <div id="resume-shown"></div></div>
+  <fieldset class="_fieldEntry"><legend>Will you now or in the future require visa sponsorship? *</legend>
+    <input class="vh" type="radio" id="sp-0" name="sponsor" value="Yes" required><label for="sp-0">Yes</label>
+    <input class="vh" type="radio" id="sp-1" name="sponsor" value="No"><label for="sp-1">No</label></fieldset>
+  <fieldset class="_fieldEntry"><legend>Are you currently a student? *</legend>
+    <input class="vh" type="radio" id="st-0" name="student" value="Yes" required><label for="st-0">Yes</label>
+    <input class="vh" type="radio" id="st-1" name="student" value="No"><label for="st-1">No</label></fieldset>
+  <div class="_fieldEntry hidden" id="school-wrap"><label for="school">School *</label><input id="school" name="school" required></div>
+  <div class="_fieldEntry"><label for="LinkedIn">LinkedIn</label><input id="LinkedIn" name="LinkedIn"></div>
+  <div class="_fieldEntry"><label for="Portfolio">Portfolio</label><input id="Portfolio" name="Portfolio"></div>
+  <div class="_fieldEntry"><label for="PortfolioPassword">Portfolio Password</label><input id="PortfolioPassword" name="Portfolio Password"></div>
+  <button type="submit">Submit Application</button>
+</form>
+<script>
+  document.getElementById("_systemfield_resume").addEventListener("change", (e) => {
+    document.getElementById("resume-shown").textContent = e.target.files[0].name;
+  });
+  for (const r of document.querySelectorAll("[name=student]")) r.addEventListener("change", () => {
+    document.getElementById("school-wrap").classList.toggle("hidden", document.getElementById("st-0").checked === false);
+  });
+</script>
+</body></html>

@@ -10,6 +10,9 @@ import PostingSection from "@/components/PostingSection";
 import ResumePreview from "@/components/ResumePreview";
 import AddEventForm from "@/components/AddEventForm";
 import EventCard from "@/components/EventCard";
+import AutomationBanner from "@/components/queue/AutomationBanner";
+import { getDb } from "@/lib/db";
+import type { WorkflowState } from "@/lib/workflow-types";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +22,9 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
   if (!job) notFound();
 
   const events = listEvents(id); // newest first
+  const workflow = getDb()
+    .prepare("SELECT workflow_state, workflow_detail, paused FROM jobs WHERE id = ?")
+    .get(id) as { workflow_state: WorkflowState | null; workflow_detail: string | null; paused: number };
   const posting = getPosting(id);
   // Only generated resumes can be previewed/revised — uploads have no conversation.
   const linkedResume = job.resume_id ? getDocument(job.resume_id) : null;
@@ -34,6 +40,9 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
       </Link>
 
       <JobHeader job={job} resumes={listDocuments("resume")} coverLetters={listDocuments("cover_letter")} />
+      <AutomationBanner
+        jobId={id} state={workflow.workflow_state} detail={workflow.workflow_detail} paused={workflow.paused === 1}
+      />
       <PostingSection jobId={id} posting={posting} hasUrl={!!job.url} />
       {generatedResume && <ResumePreview document={generatedResume} />}
 

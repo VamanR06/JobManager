@@ -2,9 +2,9 @@
 
 Personal job-application tracker that runs locally on this Mac. Track every application through applied → OA → interview rounds → accepted/rejected, with full timestamped history, OA scores and deadlines, interview notes, the resume/cover letter you actually submitted, snapshotted job descriptions, and native screen+audio interview recording.
 
-It also generates tailored resumes by driving your ChatGPT **Resume Builder** Custom GPT through a local browser-automation gateway — no OpenAI API credits needed.
+It can also generate tailored resumes in bulk: a background worker runs your **Resume Builder** plugin through the Codex or Claude Code CLI (see [Application automation](#application-automation-queue-tab)).
 
-Everything is local: a Next.js app talking to a SQLite file on disk. No accounts. The only outbound traffic is fetching a job posting you paste in, and — if you use resume generation — your own ChatGPT session.
+Everything is local: a Next.js app talking to a SQLite file on disk. No accounts unless you [set a password](#deploying-behind-a-password) to host it. The only outbound traffic is fetching a job posting you paste in, and — if you use the automation worker — your own Codex/Claude session.
 
 ## Setup
 
@@ -20,10 +20,41 @@ For a faster production build instead of dev mode:
 npm run build && npm start
 ```
 
-To run the tracker **and** the resume generator together, use `npm run start:all` instead — see
-[Resume generation](#resume-generation) below.
-
 All data lives in `data/` (SQLite DB, uploaded documents, recording `.mov` files) and is gitignored — back that folder up if you care about it.
+
+## Deploying behind a password
+
+Locally there's no login. To put it on your own server, set a password hash and the whole app
+(every page and `/api` route) sits behind a sign-in page.
+
+```bash
+npm run auth:hash        # prompts for a password, prints JOBMANAGER_PASSWORD_HASH=scrypt:...
+```
+
+Put that line in `.env.local` on the server (or your host's environment settings), then:
+
+```bash
+npm ci && npm run build && npm start      # listens on 127.0.0.1:3000
+```
+
+and point a reverse proxy with HTTPS at it, e.g. Caddy:
+
+```
+jobs.example.com {
+  reverse_proxy 127.0.0.1:3000
+}
+```
+
+- Sessions are a signed, `httpOnly` cookie good for 30 days (`Secure` when served over HTTPS).
+  Changing the password signs every session out. **Sign out** is in the nav bar.
+- Five wrong passwords from one IP locks that IP out for 15 minutes.
+- While a hash is set, the localhost-only Host check is skipped (the login replaces it); the
+  same-origin check on writes stays on.
+- The app needs a persistent disk for `data/` (SQLite + files), so use a VPS or a host with volumes
+  (Fly.io, Railway, Render disk…), not a serverless platform like Vercel.
+- The tracker, documents and URL search work anywhere. The parts that drive local tools — interview
+  recording (macOS only) and the Codex/Claude worker — need those tools
+  installed and logged in on the same machine.
 
 ## Features
 
@@ -46,14 +77,6 @@ All data lives in `data/` (SQLite DB, uploaded documents, recording `.mov` files
 
 - **Posting snapshots** — pasting a URL fetches and stores the job description (JSON-LD `JobPosting` first, Readability fallback), so it survives the posting being taken down. Bot-blocked or JS-only pages: use *Edit manually* to paste the description
 
-### Resume generation
-
-Paste a job description, get back a resume tailored to it by your own ChatGPT Custom GPT — saved
-as a document and linked to the application, like any resume you'd upload.
-
-It uses your existing **ChatGPT Plus** subscription rather than the paid API. See
-[How resume generation works](#how-resume-generation-works) for the setup and the caveats.
-
 ### Interview recording
 
 - Records the full screen + system audio (interviewer) + your mic via ScreenCaptureKit, no matter where the interview runs (Zoom app, Teams, browser). Start/stop from the interview event card; playback inline
@@ -70,119 +93,230 @@ Any unmatched path is treated as a fuzzy search, so a browser keyword shortcut (
 
 Matching is typo-tolerant (`gogle` → Google), understands acronyms (`swe` → Software Engineer, `ml` → Machine Learning), ignores company-name noise (`Inc`, `LLC`, `the`), and treats dashes, underscores, and `+` as spaces. A single confident match redirects straight to the job page; anything less shows a ranked results table with match percentages.
 
-## How resume generation works
+## Application automation (Queue tab)
 
-### The problem it solves
+Paste many job links at once, then let a local background worker extract each posting and generate a tailored
+resume. The worker uses your installed **Resume Builder** plugin through the Codex CLI. You review every resume
+before it's linked to an application.
 
-The resume tailoring lives in a ChatGPT **Custom GPT** ("Resume Builder") with its own system
-prompt and knowledge files. Using it from an app would normally mean the OpenAI API — a separate
-paid product, on top of the ChatGPT Plus subscription that already includes that GPT.
+Status, by phase:
 
-So instead of calling the API, this drives the *real* ChatGPT web session in an automated browser.
+| Phase | What | State |
+| --- | --- | --- |
+| 0 | Codex/plugin proof in the worker's non-interactive context | Plugin loads and produces a PDF + LaTeX. Blocked on missing TeX packages (see setup) |
+| 1 | Migrations, URL import, durable queue, events, Queue UI | Done |
+| 2 | Codex runner, isolation, verification, repair loop, PDF review | Done, plus Claude Code as a second engine (your call) |
+| 3 | Verified profile + answer bank, form filling, browser takeover | Greenhouse, Lever and Ashby forms are filled and read back, **never submitted**. Written answers can be AI-drafted from your evidence, then edited by you |
+| 4 | Review/submit, submission reconciliation, tracker updates | Not built. **Nothing is ever submitted** |
+| 5 | Batch mode, Chrome tab importer, more adapters | Not built |
 
-### The pieces
-
-```
-JobManager (Next.js, :3000)
-  └── POST /api/generate-resume
-        └── CatGPT-Gateway (Python + Playwright, :8000)   ← cloned as a sibling directory
-              └── a real Chrome window, logged into your ChatGPT account
-                    └── your Resume Builder Custom GPT
-```
-
-[CatGPT-Gateway](https://github.com/GautamVhavle/CatGPT-Gateway) exposes an OpenAI-shaped
-`/v1/chat/completions` endpoint, but instead of calling OpenAI it types into a real ChatGPT page
-and scrapes the reply. Upstream can't do two things this needs, so it's patched on clone:
-
-1. **Reach a Custom GPT.** Upstream hardcodes `chatgpt.com` and ignores the `model` field, so you'd
-   get plain ChatGPT with none of your GPT's prompt or knowledge files.
-2. **Return the generated PDF.** Upstream only handles DALL·E image downloads and otherwise scrapes
-   text, so the resume PDF was discarded.
-
-Patches live in [`gateway-patch/`](gateway-patch/) and are re-applied on every start, so a fresh
-clone or an upstream pull stays patched. Details and troubleshooting:
-[`gateway-patch/README.md`](gateway-patch/README.md).
-
-### First-time setup
+### Setup
 
 ```bash
-cp .env.local.example .env.local    # set GATEWAY_TOKEN; CUSTOM_GPT_URL is prefilled
-npm run start:all
+npm install
+npm run codex:doctor      # CLI version, login, plugin, resource hash, LaTeX/poppler, template packages
 ```
 
-`start:all` clones the gateway next to this repo, installs it, applies the patches, writes its
-config from your `.env.local`, waits for it to be healthy, then starts JobManager.
+Doctor must print **All checks passed**. Things it can report:
 
-The first run stops and asks you to log in once — that part is interactive:
+- **Codex login** — run `codex login` yourself in a terminal as the same macOS user that runs the worker. The
+  dashboard never asks for or stores a token.
+- **Plugin missing/disabled** — the plugin comes from the local marketplace at
+  `~/Coding/CodexPlugins/resume-builder-local` (`codex plugin marketplace list`). Keep that folder; the ZIP it came
+  from can be deleted. If you move it: `codex plugin marketplace remove <marketplace>`, then
+  `codex plugin marketplace add <new path>` and `codex plugin add $RESUME_PLUGIN_REF`.
+- **Template packages** — `Example.tex` loads packages TinyTeX doesn't ship by default. Run the
+  `tlmgr install …` command doctor prints (currently `preprint titlesec enumitem fancyhdr babel-english`).
+  Without them the sandboxed run can't install anything, and the dashboard rejects output built with substitutes.
+
+Settings are in `.env.local`; see `.env.local.example`. `RESUME_PLUGIN_REF` (your plugin's `<plugin>@<marketplace>`
+from `codex plugin list`) is required; the rest are optional: `CODEX_BIN`, `CODEX_TIMEOUT_MS`, `RESUME_TARGET_MINUTES`, `CODEX_REASONING_EFFORT` (resume runs default to `medium` even if
+your Codex config says `high`, which roughly doubled run time in testing), `RESUME_REPAIR_LIMIT`, `CODEX_MODEL`,
+`JOBMANAGER_WORK_ROOT`.
+
+### Codex or Claude
+
+The Queue page has a **Codex | Claude** toggle for which CLI runs Resume Builder on new resumes. Each resume
+version shows which engine made it. From any job you can **Generate a fresh version with** either one, or revise a
+version on either, and see one pending version per engine side by side.
+
+Both engines run **the same skill files**. For Claude, a small wrapper plugin in `~/.jobmanager/claude-plugin/`
+symlinks to the installed Resume Builder skill folder, so edits to the plugin apply to both and the rules aren't
+duplicated. Output from either engine goes through the same checks, repair loop, artifact store and review.
+
+Claude runs are `claude -p` with `--restricted` (no personal settings, hooks, CLAUDE.md or MCP servers, and file
+tools confined to the attempt folder and skill folder), `--permission-mode dontAsk`, and an OS sandbox for shell
+commands with no unsandboxed fallback (no network; writes only in the attempt folder). Unlike Codex, reads of
+`~/.ssh`, cloud credentials, browser profiles, Codex's login and this app's `data/` are also denied. They use your
+Claude Code login and count against your Claude plan. `npm run codex:doctor` checks both engines;
+`npm run codex:smoke -- --engine claude` does a timed Claude run.
+
+### Running
+
+Two processes: the dashboard and the worker.
 
 ```bash
-cd ../CatGPT-Gateway
-./.venv/bin/python scripts/first_login.py   # log into ChatGPT in the window that opens
+npm run dev        # dashboard, bound to 127.0.0.1:3000
+npm run worker     # background worker (Ctrl-C to stop; it hands its current step back)
 ```
 
-Then `npm run start:all` again. The session persists in `browser_data/` for days-to-weeks; when it
-expires, generation starts failing and you re-run that command.
+1. **Queue → Import job links**: paste links, one per line, then **Preview**. Each link is labelled as new, already
+   tracked (with a link to the existing application), invalid, or unsupported. **Import** creates a normal
+   application row for each new link, so it also shows on the dashboard, and queues it.
+2. The worker **extracts** the posting. Greenhouse, Lever, Ashby and Workday are read through their public posting
+   APIs, which also report closed postings; other sites fall back to page parsing. Each capture is saved as a dated,
+   hashed snapshot. If a description is too short, blocked or JS-only, the job waits for you: paste the description
+   on the job page (**Edit manually**), then press **Continue** on the queue.
+3. The worker runs **Resume Builder**. See [what the worker checks](#what-the-worker-checks).
+4. **Review**: expand the row to preview the PDF, see each check and the plugin's own report, and then **Approve**
+   (registers it as a resume document and links it to the application), **Request revision** (your notes go back
+   through the plugin), or **Reject**.
 
-> A Chrome banner reading **"unsupported command-line flag: --host-resolver-rules"** is expected
-> and harmless — it's upstream's Docker DNS workaround. Ignore it. Only if pages *fail to load*,
-> set `SKIP_HOST_RESOLVER_RULES=true` in `.env.local`.
+Row controls: **Pause** (no new step starts), **Cancel/Stop** (a running Codex process is terminated), **Retry**. A
+job page for an application you added by hand has a link to put it through the same resume flow.
 
-### Using it
+Fill in **Profile** with facts you've confirmed (name, email, work authorization, sponsorship…). The resume check
+compares the PDF's name/email against it; later phases will answer application questions from it.
 
-**From an application** — open a job with a saved description and click **Generate resume** on the
-job-description section. The result is saved as a resume *and* linked to that application, exactly
-as if you'd uploaded it and picked it from the dropdown.
+### What the worker checks
 
-**Standalone** — the **Generate** tab takes a pasted description and saves the resume unlinked,
-for when there's no application yet. It also lists recent generations, including failed ones.
+For each attempt it:
 
-Either way a run takes roughly a minute: page load, human-paced typing, the model thinking, then
-the PDF being built. Requests are queued one at a time; keep the Chrome window open but ignore it.
+- creates a private (0700) folder under `~/.jobmanager/work/job-<id>/`, outside this repo, containing
+  `job.json`, the dated `job_description.md`, your verified contact facts, and any revision feedback;
+- runs `codex exec --json --sandbox workspace-write --output-schema … -o result.json -` in that folder. Writes are
+  limited to the folder (`/tmp` is excluded), there's no network access, and there are no bypass flags. The prompt
+  goes through stdin, so no job text or URL ever appears on a command line. The environment is stripped down to
+  what Codex needs to find its own login;
+- reads **only** the final `-o` file as the result (progress events are just logged), validates it against the
+  app's JSON Schema, then checks the files itself: paths must stay inside `output/` (no traversal, absolute paths
+  or symlinks), files must be non-empty and newer than the run's start, the PDF must be exactly one page with
+  extractable Education/Experience/Projects/Skills text and your verified name/email, and the `.tex` must
+  recompile (shell escape off) to the same text as the PDF. It also requires evidence in the run's own commands
+  that SKILL.md, the full spec, Example.tex and the content bank were read; the plugin naming itself isn't enough;
+- if checks fail, reruns **the plugin** with the concrete failures, up to `RESUME_REPAIR_LIMIT` times, then asks
+  you rather than claiming success. Login expiry, usage limits, a missing plugin and missing TeX packages each stop
+  with a specific message instead of retrying.
 
-### Preview and revising
+Passing files are copied into `data/artifacts/job-<id>/v<n>/` (read-only, sha256 recorded) with the plugin version,
+resource hash, CLI version and token usage. Later versions never overwrite earlier ones.
 
-A generated resume gets a **Generated resume** panel — on the job page, and right after generating
-on the Generate tab. It previews the PDF inline and has a message box under it.
+### Filling the application form (Greenhouse, Lever, Ashby)
 
-Sending a message there continues the *same ChatGPT conversation*, so the GPT still has the job
-description and the resume it just produced in context — "move projects above experience" is enough.
-The new PDF **overwrites the file in place**, keeping the same document row, so anything already
-linked to that resume follows the new version.
+Approving a resume on a Greenhouse, Lever or Ashby posting queues a **prepare** step. The worker opens the
+application in its own visible Chrome window. That window uses a separate profile in `~/.jobmanager/browser-profile`,
+not your normal Chrome, and can only load the employer's application site.
 
-Revising needs a linked conversation, so it only works on resumes generated after this feature
-landed; older ones show a note instead of the message box.
+1. **Read the form:** the worker reads every field with its question text and options. It opens each dropdown to
+   list its choices but types nothing.
+2. **Decide each answer:**
+   - **Facts** (name, email, phone, school, GPA, links…) come from your Profile, exactly as entered.
+   - **Work authorization and sponsorship** are separate facts, answered only from your explicit Profile answers.
+   - **Voluntary demographic questions** follow your Profile's policy. With "decline", it picks the decline option;
+     if a question has none, it's asked (required) or left blank (optional). Nothing is inferred.
+   - **Attestations** ("I certify…") and **written answers** always come from you, for this application.
+   - **Everything else** comes from the answer bank, or it asks you.
+   - **Password-like fields** are never filled from your Profile.
+3. **Fill what it knows, pause for the rest:** every field it can answer is filled straight away. Anything it can't
+   answer confidently is left blank in the tab and shows on the queue row under *Application form*, with the site's
+   own options. You can also just type those answers in the browser tab. Search-style dropdowns (school lists,
+   places) are searched for your value first; if several results match (e.g. University of Michigan's three
+   campuses), you're asked once with the real results, and your pick is reused. Save your answers and pick where each is reused: all applications, this company, or
+   this application only. The form is then filled without starting over. Questions that mention the company
+   ("How did you hear about Tanium?") are saved with the company name abstracted, so "all applications" reuses them
+   for other employers.
+   **✨ Draft with AI:** written questions ("Why do you want to work here?", "Describe your experience…") have a
+   draft button, for one question or all of them. It runs a short separate task on Codex or Claude. That task can
+   read only your content bank, your STAR stories, the resume approved for this job, and the posting. It has no
+   shell, no write access and no browser. Drafts land in the answer boxes for you to edit. Anything the answer would
+   need that isn't in your evidence (a personal reason for choosing the company, experience the posting asks for
+   that you haven't recorded) is flagged in amber. Nothing is saved until you press Save. It takes about 45 seconds
+   on Claude or 1½–2 minutes on Codex.
+   **🔎 AI-match leftovers:** for questions its rules couldn't answer, this sends only those questions (label, type,
+   exact options) plus your Profile values and saved answers to Codex or Claude. The model says which of your facts
+   answers which question; no page HTML is sent, and written, attestation and demographic questions are never
+   included. Every match is checked: it must cite a real fact, an option must be one of the real options, and typed
+   text must be your value word for word. Anything else is rejected and listed. **Stated** matches are saved for this
+   application and the form is refilled. **Implied** ones (e.g. "Are you a UNL student?" → "No" because your school
+   is Michigan) are only pre-selected for you to confirm. Preference questions (pay, on-site, relocation) are never
+   inferred. Takes ~10 s on Claude (about $0.06 in testing).
+4. **Fill:** the approved resume is uploaded first, named `<Name>_Resume_<Company>.pdf`, then the rest of the form.
+   Follow-up questions revealed by a choice are picked up and answered too.
+5. **Read back:** every value is checked against the page. Anything the site's resume parser overwrote is re-entered
+   and reported. If a field won't take its value, the step stops and says which one.
+6. **You submit, and it's recorded:** while the worker runs, it watches the tab. When the site shows its own
+   confirmation ("Thank you for applying" / "Application submitted") and the form is gone, the job moves to *Done*
+   as **Submitted**. It also gets an **Applied** entry in its status timeline and a receipt screenshot in
+   `data/artifacts/job-<id>/`. If the site shows a warning instead (spam/VPN check, error), the queue row says so.
+   Closed the tab, or applied somewhere else? Use **I submitted it** on the queue row.
+   The tab is left open as *Ready to submit*. Review it in that window and click Submit yourself. The
+   automation has no submit action, and native form submission is blocked while it's typing.
 
-### What gets saved
+CAPTCHA challenges, sign-in walls and required uploads other than the resume stop with a message, and the tab stays
+open for you to take over. Keep the worker running while you review; stopping it closes those tabs, but logins in
+the automation profile persist.
 
-A generated resume is an ordinary document row — it appears on the Resumes tab, opens through
-`/api/documents/{id}/file`, and can be renamed or archived like an upload. It's marked with a
-`generated` pill, remembers which posting it came from, and takes the job's resume slot (the
-previous one is unlinked, not deleted).
+### Parallel runs
 
-Files are named **`<RESUME_NAME>_Resume_<Company>.pdf`** — e.g. `Vaman_Rajagopal_Resume_Roblox.pdf`.
-`RESUME_NAME` comes from `.env.local`; the company comes from the job, or from the optional company
-field on the Generate tab.
+The worker runs several steps at once, each kind with its own limit (all workers combined; set in `.env.local`):
 
-Every run also writes a `generations` row — input, reply text, success/failure — so failures leave
-a visible trace instead of vanishing.
+| Setting | Default | What |
+| --- | --- | --- |
+| `RESUME_CONCURRENCY` | 2 | Resume generations (Codex or Claude). Higher = faster batches, faster usage burn |
+| `FORM_CONCURRENCY` | 2 | Application forms filled at once, each in its own tab |
+| `FETCH_CONCURRENCY` | 3 | Posting fetches |
 
-**If no PDF comes back**, the reply is saved as a `.md` resume and flagged with a warning rather
-than erroring out. That's the normal symptom of ChatGPT changing its UI and breaking download
-capture; nothing is lost, and the fix is in
-[`gateway-patch/README.md`](gateway-patch/README.md#when-it-breaks).
+So while two resumes generate, other jobs' postings are fetched and approved jobs' forms are filled. Each
+application still has only one step in flight. Limits are enforced in the same atomic database claim that stops two
+workers taking the same task. Submitting stays manual: submit each filled tab yourself, and the watcher records
+each confirmation as it happens.
 
-### Caveats
+### Crash recovery
 
-- **Brittle by nature.** Download capture depends on ChatGPT's DOM and will break on UI changes.
-  The `.md` fallback exists so a break costs you formatting, not work.
-- **Slow and serial.** One request at a time, ~1 min each. Not for bulk generation.
-- **Against OpenAI's ToS.** Automating the ChatGPT web UI violates the Terms of Use. Low-volume
-  personal use rarely draws action and the usual escalation is a warning or temporary block, but a
-  permanent ban is possible and would take the Plus subscription with it. `HEADLESS=false` and the
-  default typing delays are set deliberately — leave them alone, and don't batch-generate. The
-  zero-risk alternative is the OpenAI API.
-- Leaving the gateway running is fine. Idle, it makes no requests to ChatGPT; it only acts when
-  JobManager posts to it.
+Queue state lives in SQLite (`tasks`, `workflow_events`, `codex_runs`), so a refresh or restart loses nothing.
+Each running step holds a 2-minute lease renewed every 20s. If the worker dies, the next worker resumes the step
+from the start in a fresh folder, first stopping any Codex process the dead worker left behind. That process is
+only stopped when its pid *and* start time match the recorded run. Two workers can't claim the same task, and
+never run two Codex or two browser tasks at once. Steps that can have external effects (future submission) are
+never replayed after a crash; they go to `submission_unknown` for you to reconcile.
+
+### Maintenance
+
+```bash
+npm run db:migrate -- --check   # migrate a VACUUM INTO copy of data/app.db and compare row counts
+npm run db:migrate              # back up to data/backups/, then migrate (also happens on server start)
+npm run codex:smoke             # one real plugin run on a synthetic posting in a throwaway data dir (uses quota)
+npm test                        # uses a fake Codex/Claude and local form copies; never real quota, sites or submissions
+```
+
+**Refreshing the plugin** is deliberate; nothing syncs from ChatGPT automatically. Re-export it, replace the
+marketplace folder's contents, then reinstall so Codex re-caches it:
+`codex plugin remove $RESUME_PLUGIN_REF` followed by
+`codex plugin add $RESUME_PLUGIN_REF`. (`marketplace upgrade` only applies to
+Git marketplaces.) Run `npm run codex:doctor` afterwards. The version and resource hash it prints are recorded on
+every run, so it's clear which runs used which bundle.
+
+### Security notes
+
+- Without a password set, the app only answers requests whose Host is `localhost`/`127.0.0.1`, which blocks DNS
+  rebinding; with one set, everything requires a signed-in session instead (see
+  [Deploying behind a password](#deploying-behind-a-password)). Writes must come from this same origin either
+  way, which blocks other sites in your browser (`src/proxy.ts`). The server binds to loopback.
+  `JOBMANAGER_ALLOWED_HOSTS` adds names.
+- Pasted links, and every redirect they follow, may only reach public hosts on ports 80/443. Local, private,
+  link-local and metadata addresses are refused.
+- Job pages are treated as data. They reach Codex only as a file the prompt says to treat as untrusted.
+
+### Known limitations
+
+- Codex's macOS sandbox limits **writes and network**, not reads, so a run could still read other files on disk.
+  Isolation from other jobs comes from separate folders, `/tmp` exclusion, and never reusing sessions.
+- Posting extraction doesn't use the browser; JS-only career sites without a known API need manual paste.
+- Form filling covers Greenhouse, Lever and Ashby only. Workday (accounts, multi-page), Oracle, SmartRecruiters
+  and Workable are next.
+- Visual layout (line wrapping, bottom whitespace) is judged by the plugin's own rendered-page inspection and
+  reported in its report. The dashboard doesn't re-judge it.
+- Codex usage is significant: the proof run used ~4.8M input tokens (mostly cached) and ~32k output tokens.
 
 ## Recording permissions (one-time)
 
@@ -196,18 +330,27 @@ src/lib/queries.ts     all DB access
 src/lib/search.ts      fuzzy scoring for URL search
 src/lib/parser.ts      job-posting fetch/extract
 src/lib/recorder.ts    spawns and tracks the native recorder process
-src/lib/gateway.ts     talks to the CatGPT gateway (resume generation)
-src/app/api/*          route handlers: jobs, events, documents, recordings, parse, generate-resume
+src/lib/urls.ts        link normalisation, ATS detection, dedup keys
+src/lib/netguard.ts    outbound-fetch guard (public hosts only, per-hop redirect checks)
+src/lib/extract.ts     posting extraction (ATS APIs, HTML fallback)
+src/lib/queue.ts       durable task queue: leases, heartbeats, retry, pause/cancel
+src/lib/automation.ts  import, snapshots, Codex runs, artifacts, profile
+src/lib/steps.ts       worker step bodies (extract, resume)
+src/lib/codex/*        Codex preflight, subprocess, result schema, artifact verification
+src/proxy.ts           password/session gate (or loopback-host check) + same-origin guard
+src/lib/auth.ts        password hashing and signed session cookies
+worker/index.ts        the automation worker (npm run worker)
+scripts/automation-cli.ts  migrate / doctor / smoke
+scripts/hash-password.ts   npm run auth:hash
+test/*                 node:test suite (npm test) with a fake Codex
+src/app/api/*          route handlers: jobs, events, documents, recordings, parse, queue, import, auth
 src/app/[...slug]/     URL-search catch-all
 src/components/*       client components (forms, event cards, pickers)
 recorder/JobRecorder.swift   native macOS screen/audio recorder
-gateway-patch/         patches + overlay applied to the CatGPT-Gateway clone
-scripts/start-all.sh   brings up the gateway and the app together
-data/                  gitignored: app.db, documents/, recordings/
-../CatGPT-Gateway/     gitignored sibling: the patched Python gateway (cloned by start:all)
+data/                  gitignored: app.db, documents/, recordings/, artifacts/, backups/
 ```
 
-Schema changes are additive `ALTER TABLE` migrations applied in `open()` in `src/lib/db.ts`, guarded by a `PRAGMA table_info` check, so an existing `data/app.db` upgrades in place on the next server start.
+Schema changes are numbered entries in `MIGRATIONS` in `src/lib/db.ts`, tracked with `PRAGMA user_version`, so an existing `data/app.db` upgrades in place on the next start. `npm run db:migrate` applies them to the live DB (after a backup) without a restart.
 
 ## Notes
 
@@ -216,5 +359,3 @@ Schema changes are additive `ALTER TABLE` migrations applied in `open()` in `src
 - If the server restarts mid-recording, the orphaned recording row is marked `failed` on next startup
 - Auto-saved fields (event notes, links, OA score) debounce ~600ms and also flush on blur and on page unload, so a refresh mid-typing doesn't lose the edit
 - `PATCH` routes only overwrite fields you actually send — omitted fields are left alone
-- Resume generation needs `.env.local` (`GATEWAY_TOKEN`, `CUSTOM_GPT_URL`); without it the Generate button returns a clear error rather than failing silently
-- If the server restarts mid-generation, the orphaned `pending` row is marked `failed` on next startup, same as recordings

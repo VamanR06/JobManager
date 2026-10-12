@@ -1,0 +1,78 @@
+<!doctype html><html><head><title>Greenhouse-style application</title>
+<style>.menu{border:1px solid #ccc}.menu[hidden]{display:none}.req-helper{width:1px;height:1px;opacity:0}</style></head><body>
+<form method="POST" action="/submit" id="application-form">
+  <div class="field-wrapper"><label for="first_name">First Name*</label><input id="first_name" required></div>
+  <div class="field-wrapper"><label for="last_name">Last Name*</label><input id="last_name" required></div>
+  <div class="field-wrapper"><label for="email">Email*</label><input id="email" required></div>
+  <div class="field-wrapper"><label for="phone">Phone*</label><input id="phone" type="tel" required></div>
+  <div class="field-wrapper"><div role="group" aria-labelledby="upload-label-resume" aria-required="true" class="file-upload">
+    <div id="upload-label-resume" class="label upload-label">Resume/CV<span class="required">*</span></div>
+    <button type="button">Attach</button><label class="visually-hidden" for="resume">Attach</label>
+    <input id="resume" type="file" style="display:none"><span id="resume-shown"></span></div></div>
+  <div class="select__container" data-options="Associate's Degree|Bachelor's Degree|Master's Degree|Doctorate"><label for="degree--0">Degree*</label>
+    <div class="select__control"><div class="select__value-container"><div class="select__single-value"></div><div class="select__input-container"><input id="degree--0" role="combobox" aria-required="true"></div></div></div>
+    <input class="req-helper" required tabindex="-1"></div>
+  <div class="select__container" data-async="1"><label for="school--0">School*</label>
+    <div class="select__control"><div class="select__value-container"><div class="select__single-value"></div><div class="select__input-container"><input id="school--0" role="combobox" aria-required="true"></div></div></div></div>
+  <div class="select__container" data-options="Yes|No"><label for="question_1">Are you legally authorized to work in the United States?*</label>
+    <div class="select__control"><div class="select__value-container"><div class="select__single-value"></div><div class="select__input-container"><input id="question_1" role="combobox" aria-required="true"></div></div></div></div>
+  <div class="select__container" data-options="Male|Female|Decline To Self Identify"><label for="4001">Gender*</label>
+    <div class="select__control"><div class="select__value-container"><div class="select__single-value"></div><div class="select__input-container"><input id="4001" role="combobox" aria-required="true"></div></div></div></div>
+  <div class="select__container" data-options="I acknowledge"><label for="question_9">Please confirm receipt of the above linked Global Data Privacy Notice*</label>
+    <div class="select__control"><div class="select__value-container"><div class="select__single-value"></div><div class="select__input-container"><input id="question_9" role="combobox" aria-required="true"></div></div></div></div>
+  <div class="select__container" data-options="I use them daily|Occasionally|I don't use AI tools"><label for="question_10">Which of the following best describes how you use AI tools today?*</label>
+    <div class="select__control"><div class="select__value-container"><div class="select__single-value"></div><div class="select__input-container"><input id="question_10" role="combobox" aria-required="true"></div></div></div></div>
+  <div class="field-wrapper"><label for="question_2">How did you hear about Tanium?*</label><input id="question_2" required></div>
+  <button type="submit">Submit application</button>
+</form>
+<script>
+  // Minimal react-select stand-in: click opens a listbox; typing filters; clicking picks.
+  for (const box of document.querySelectorAll(".select__container")) {
+    const input = box.querySelector("[role=combobox]");
+    const shown = box.querySelector(".select__single-value");
+    const menu = document.createElement("div");
+    menu.className = "menu"; menu.setAttribute("role", "listbox"); menu.hidden = true;
+    box.appendChild(menu);
+    // Async search (like Greenhouse's school list): opening shows the first 100
+    // schools alphabetically; typing fetches matches after a delay.
+    const firstPage = Array.from({ length: 100 }, (_, i) => "Aardvark College " + String(i).padStart(3, "0"));
+    const searchable = ["Michigan State University", "University of Michigan - Ann Arbor", "University of Michigan - Dearborn", "University of Michigan - Flint"];
+    let timer = null;
+    const render = () => {
+      const q = input.value.toLowerCase();
+      if (box.dataset.async) {
+        clearTimeout(timer);
+        const show = (list) => {
+          menu.innerHTML = "";
+          for (const o of list) {
+            const d = document.createElement("div");
+            d.setAttribute("role", "option"); d.textContent = o;
+            d.addEventListener("mousedown", (e) => { e.preventDefault(); shown.textContent = o; input.value = ""; menu.hidden = true; });
+            menu.appendChild(d);
+          }
+        };
+        if (!q) return show(firstPage);
+        show([]);
+        const loading = document.createElement("div"); loading.textContent = "Loading..."; menu.appendChild(loading);
+        timer = setTimeout(() => show(searchable.filter((o) => o.toLowerCase().includes(q))), 800);
+        return;
+      }
+      menu.innerHTML = "";
+      for (const o of box.dataset.options.split("|").filter((o) => o.toLowerCase().includes(q))) {
+        const d = document.createElement("div");
+        d.setAttribute("role", "option"); d.textContent = o;
+        d.addEventListener("mousedown", (e) => { e.preventDefault(); shown.textContent = o; input.value = ""; menu.hidden = true; });
+        menu.appendChild(d);
+      }
+    };
+    input.addEventListener("focus", () => { render(); menu.hidden = false; });
+    input.addEventListener("click", () => { render(); menu.hidden = false; });
+    input.addEventListener("input", () => { render(); menu.hidden = false; });
+    input.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.hidden = true; });
+    input.addEventListener("blur", () => { menu.hidden = true; });
+  }
+  document.getElementById("resume").addEventListener("change", (e) => {
+    document.getElementById("resume-shown").textContent = e.target.files[0].name;
+  });
+</script>
+</body></html>

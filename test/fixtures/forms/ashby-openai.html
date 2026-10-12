@@ -1,0 +1,59 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Ashby (OpenAI-style) application</title>
+<style>.sr{position:absolute;opacity:0;width:1px;height:1px}.menu[hidden]{display:none}</style></head><body>
+<form method="POST" action="/submit">
+  <div class="_fieldEntry" data-field-path="_systemfield_name"><label class="_heading _required" for="_systemfield_name">Legal Name</label><input id="_systemfield_name" name="_systemfield_name"></div>
+  <div class="_fieldEntry" data-field-path="_systemfield_email"><label class="_heading _required" for="_systemfield_email">Email</label><input id="_systemfield_email" name="_systemfield_email" type="email"></div>
+  <div class="_fieldEntry" data-field-path="_systemfield_resume"><label class="_heading _required" for="_systemfield_resume">Resume</label><input id="_systemfield_resume" type="file" class="sr"></div>
+
+  <!-- Location search: no id, no name; suggestions appear as you type. -->
+  <div class="_fieldEntry" data-field-path="_systemfield_location"><label class="_heading _required _label" for="_systemfield_location">Where are you currently located?</label>
+    <div class="_inputContainer"><input class="_input" placeholder="Start typing..." role="combobox" aria-autocomplete="list" value=""></div></div>
+
+  <!-- Date picker: also no id/name. -->
+  <div class="_fieldEntry" data-field-path="start"><label class="_heading _required _label" for="start">When can you start a new role?</label>
+    <div class="react-datepicker-wrapper"><input type="text" placeholder="Pick date..." class="_input ashby-application-form-input-date" required value=""></div></div>
+
+  <!-- Yes/No buttons with a hidden checkbox behind them. -->
+  <div class="_fieldEntry" data-field-path="auth"><label class="_heading _required _label" for="auth">Are you authorized to work in the country where the job is located?</label>
+    <div class="_container _yesno"><button type="button" aria-pressed="false" data-option="yes">Yes</button><button type="button" aria-pressed="false" data-option="no">No</button><input type="checkbox" class="_input" tabindex="-1" name="auth"></div></div>
+  <div class="_fieldEntry" data-field-path="office"><label class="_heading _required _label" for="office">Are you able to work from our US office three days per week?</label>
+    <div class="_container _yesno"><button type="button" aria-pressed="false" data-option="yes">Yes</button><button type="button" aria-pressed="false" data-option="no">No</button><input type="checkbox" class="_input" tabindex="-1" name="office"></div></div>
+
+  <!-- Checkbox group: each option has its own name; one question. -->
+  <div class="_container _fieldEntry ashby-application-form-input-checkbox-group"><label class="_heading _required _label" for="locs">Please select&nbsp; all office locations of interest.</label>
+    <div class="_description"><p>We hire in San Francisco, Mountain View, and Seattle.</p></div>
+    <div class="_option"><span class="ashby-application-form-input-checkbox-group-option-checkbox _container"><input type="checkbox" id="locs-0" name="San Francisco"></span><label for="locs-0">San Francisco</label></div>
+    <div class="_option"><span class="ashby-application-form-input-checkbox-group-option-checkbox _container"><input type="checkbox" id="locs-1" name="Mountain View"></span><label for="locs-1">Mountain View</label></div>
+    <div class="_option"><span class="ashby-application-form-input-checkbox-group-option-checkbox _container"><input type="checkbox" id="locs-2" name="Seattle"></span><label for="locs-2">Seattle</label></div></div>
+
+  <!-- Acknowledgement: one checkbox under a required heading. -->
+  <fieldset class="_container _fieldEntry ashby-application-form-input-checkbox-group"><label class="_heading _required _label" for="arb">Applicant Arbitration Agreement Acknowledgement</label>
+    <div class="_option"><span class="ashby-application-form-input-checkbox-group-option-checkbox _container"><input type="checkbox" id="arb-0" name="I acknowledge that I have opened, read, and understood the Arbitration Agreement."></span><label for="arb-0">I acknowledge that I have opened, read, and understood the Arbitration Agreement.</label></div></fieldset>
+
+  <button type="submit">Submit Application</button>
+</form>
+<script>
+  for (const box of document.querySelectorAll("._yesno")) {
+    for (const b of box.querySelectorAll("button")) b.addEventListener("click", () => {
+      for (const o of box.querySelectorAll("button")) o.setAttribute("aria-pressed", String(o === b));
+      box.querySelector("input").checked = b.dataset.option === "yes";
+    });
+  }
+  // Place search stand-in.
+  const loc = document.querySelector("[data-field-path=_systemfield_location] input");
+  const menu = document.createElement("div"); menu.className = "menu"; menu.setAttribute("role", "listbox"); menu.hidden = true;
+  loc.parentElement.appendChild(menu);
+  const places = ["Ann Arbor, Michigan, United States", "Ann Arbor Charter Township, Michigan, United States", "Seattle, Washington, United States"];
+  const render = () => {
+    const q = loc.value.toLowerCase().split(",")[0].trim();
+    menu.innerHTML = ""; menu.hidden = !q;
+    for (const p of places.filter((p) => q && p.toLowerCase().includes(q))) {
+      const d = document.createElement("div"); d.setAttribute("role", "option"); d.textContent = p;
+      d.addEventListener("mousedown", (e) => { e.preventDefault(); loc.value = p; menu.hidden = true; });
+      menu.appendChild(d);
+    }
+  };
+  loc.addEventListener("input", render);
+  loc.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.hidden = true; });
+</script>
+</body></html>

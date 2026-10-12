@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import type { AppDocument } from "@/lib/types";
+import { documentLabel } from "@/lib/format";
 
 interface Props {
   jobId: number;
@@ -37,7 +38,7 @@ export default function DocumentPicker({ jobId, field, label, options, value }: 
         <option value="">— none —</option>
         {visible.map((doc) => (
           <option key={doc.id} value={doc.id}>
-            {doc.name}
+            {documentLabel(doc, options)}
             {doc.archived ? " (archived)" : ""}
           </option>
         ))}

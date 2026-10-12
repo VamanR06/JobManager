@@ -46,3 +46,7 @@ data/
 
 # compiled recorder binary
 bin/
+.probe/
+
+# private planning notes
+docs/

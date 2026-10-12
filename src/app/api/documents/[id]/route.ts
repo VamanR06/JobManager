@@ -35,7 +35,11 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ archived: true });
   }
 
-  fs.rmSync(path.join(process.cwd(), "data", doc.file_path), { force: true });
+  // Automation artifacts are immutable history (resume_artifacts points at them):
+  // drop the document row but keep the file.
+  if (!doc.file_path.startsWith(`artifacts${path.sep}`)) {
+    fs.rmSync(path.join(process.cwd(), "data", doc.file_path), { force: true });
+  }
   deleteDocument(id);
   return NextResponse.json({ deleted: true });
 }

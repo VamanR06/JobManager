@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { STATUSES, type AppDocument, type DocumentKind, type Status } from "@/lib/types";
-import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/format";
-import ResumePreview from "./ResumePreview";
+import { documentLabel, fromDatetimeLocal, toDatetimeLocal } from "@/lib/format";
 
 interface ParsedPosting {
   title: string | null;
@@ -20,8 +19,6 @@ interface Props {
 
 /** Sentinel value for the "upload a new file" choice in the document dropdowns. */
 const UPLOAD_OPTION = "__upload__";
-/** Sentinel for "generate a resume with the Custom GPT" in the resume dropdown. */
-const GENERATE_OPTION = "__generate__";
 
 export default function AddJobForm({ resumes: allResumes, coverLetters: allCoverLetters }: Props) {
   const router = useRouter();
@@ -56,13 +53,6 @@ export default function AddJobForm({ resumes: allResumes, coverLetters: allCover
   const resumeFileRef = useRef<HTMLInputElement>(null);
   const coverLetterFileRef = useRef<HTMLInputElement>(null);
   const [uploadingKind, setUploadingKind] = useState<DocumentKind | null>(null);
-  // Resume-generation modal, opened from the resume dropdown.
-  const [generateOpen, setGenerateOpen] = useState(false);
-  const [genDescription, setGenDescription] = useState("");
-  const [generating, setGenerating] = useState(false);
-  const [genError, setGenError] = useState<string | null>(null);
-  // The resume produced in this modal, previewed in place before saving.
-  const [generated, setGenerated] = useState<AppDocument | null>(null);
 
   /** Upload a picked file and select it in the matching dropdown. */
   async function uploadDocument(kind: DocumentKind, file: File | undefined) {
@@ -77,6 +67,13 @@ export default function AddJobForm({ resumes: allResumes, coverLetters: allCover
       const doc = await res.json();
       if (!res.ok) throw new Error(doc.error ?? "Upload failed");
       setUploaded((prev) => [...prev, doc as AppDocument]);
+      setNotice(
+        doc.duplicate
+          ? `Identical to the existing ${documentLabel(doc)} — selected that instead of saving a copy.`
+          : doc.version > 1
+            ? `Saved as version ${doc.version} of ${doc.name}.`
+            : null
+      );
       if (kind === "resume") setResumeId(String(doc.id));
       else setCoverLetterId(String(doc.id));
       router.refresh();
@@ -95,47 +92,8 @@ export default function AddJobForm({ resumes: allResumes, coverLetters: allCover
       (kind === "resume" ? resumeFileRef : coverLetterFileRef).current?.click();
       return;
     }
-    if (value === GENERATE_OPTION) {
-      // Reuse the fetched posting when there is one, so there's nothing to paste.
-      setGenDescription(posting?.description_md ?? "");
-      setGenError(null);
-      // Keep any resume already generated in this form — reopening returns to
-      // its preview rather than silently discarding it.
-      setGenerateOpen(true);
-      return;
-    }
     if (kind === "resume") setResumeId(value);
     else setCoverLetterId(value);
-  }
-
-  /** Generate a resume from a description and select it in the dropdown. */
-  async function generateResume() {
-    setGenerating(true);
-    setGenError(null);
-    try {
-      const res = await fetch("/api/generate-resume", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // The form's own Company field names the file — no need to ask twice.
-        body: JSON.stringify({ description: genDescription, company: company.trim() || null }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "Generation failed");
-      const doc = body.document as AppDocument;
-      setUploaded((prev) => [...prev, doc]);
-      setResumeId(String(doc.id));
-      // Keep the modal open on the result so it can be previewed and revised
-      // before the application is saved.
-      setGenerated(doc);
-      setGenDescription("");
-      if (body.warning) setNotice(body.warning);
-      else setNotice(`Generated ${doc.name}`);
-      router.refresh();
-    } catch (err) {
-      setGenError(err instanceof Error ? err.message : "Generation failed");
-    } finally {
-      setGenerating(false);
-    }
   }
 
   async function fetchPosting() {
@@ -194,7 +152,6 @@ export default function AddJobForm({ resumes: allResumes, coverLetters: allCover
       setResumeId("");
       setCoverLetterId("");
       setUploaded([]);
-      setGenerated(null);
       setWhen(toDatetimeLocal(new Date().toISOString()));
       setOpen(false);
       router.refresh();
@@ -221,85 +178,13 @@ export default function AddJobForm({ resumes: allResumes, coverLetters: allCover
 
   return (
     <>
-    {generateOpen && (
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-        onClick={() => !generating && setGenerateOpen(false)}
-      >
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="max-h-[90vh] w-full max-w-2xl space-y-3 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-4 shadow-xl dark:border-zinc-800 dark:bg-zinc-950"
-        >
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold">
-              {generated ? "Resume ready" : "Generate resume"}
-            </h2>
-            <button
-              type="button"
-              onClick={() => setGenerateOpen(false)}
-              disabled={generating}
-              className="text-sm text-zinc-500 hover:underline disabled:opacity-50"
-            >
-              {generated ? "Done" : "Cancel"}
-            </button>
-          </div>
-
-          {generated ? (
-            <>
-              <p className="text-xs text-zinc-500">
-                Saved as <span className="font-medium">{generated.name}</span> and selected below.
-                Preview it and ask for changes, then close and save the application. You can reopen
-                this from the resume dropdown at any point before saving.
-              </p>
-              <ResumePreview document={generated} defaultOpen />
-              <button
-                type="button"
-                onClick={() => {
-                  setGenerated(null);
-                  setGenDescription(posting?.description_md ?? "");
-                }}
-                className="text-xs text-zinc-500 hover:underline"
-              >
-                Generate a different resume instead
-              </button>
-            </>
-          ) : (
-            <>
-              <p className="text-xs text-zinc-500">
-                Runs through your Resume Builder GPT in ChatGPT. Takes about a minute — the resume is
-                saved and selected below.
-                {company.trim() ? ` Will be named for ${company.trim()}.` : ""}
-              </p>
-              <textarea
-                autoFocus
-                value={genDescription}
-                onChange={(e) => setGenDescription(e.target.value)}
-                rows={12}
-                placeholder="Paste the job description here…"
-                className={inputCls}
-              />
-              {genError && <p className="text-xs text-red-600 dark:text-red-400">{genError}</p>}
-              <button
-                type="button"
-                onClick={generateResume}
-                disabled={generating || !genDescription.trim()}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-              >
-                {generating ? "Generating… (~1 min)" : "Generate resume"}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    )}
     <form onSubmit={submit} className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800 space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold">New application</h2>
         <button
           type="button"
           onClick={() => setOpen(false)}
-          disabled={generating}
-          className="text-sm text-zinc-500 hover:underline disabled:opacity-50"
+          className="text-sm text-zinc-500 hover:underline"
         >
           Cancel
         </button>
@@ -387,25 +272,13 @@ export default function AddJobForm({ resumes: allResumes, coverLetters: allCover
             className={`${inputCls} mt-1`}
           >
             <option value="">{uploadingKind === "resume" ? "Uploading…" : "— none —"}</option>
+            <option value={UPLOAD_OPTION}>+ Upload new resume…</option>
             {resumes.map((d) => (
               <option key={d.id} value={d.id}>
-                {d.name}
+                {documentLabel(d, resumes)}
               </option>
             ))}
-            <option value={UPLOAD_OPTION}>+ Upload new resume…</option>
-            <option value={GENERATE_OPTION}>
-              {generated ? "✨ Preview / revise generated resume…" : "✨ Generate resume…"}
-            </option>
           </select>
-          {generated && (
-            <button
-              type="button"
-              onClick={() => setGenerateOpen(true)}
-              className="mt-1 text-xs text-blue-600 hover:underline dark:text-blue-400"
-            >
-              Preview / revise ↗
-            </button>
-          )}
         </label>
         <label className="text-xs text-zinc-500">
           Cover letter used
@@ -418,7 +291,7 @@ export default function AddJobForm({ resumes: allResumes, coverLetters: allCover
             <option value="">{uploadingKind === "cover_letter" ? "Uploading…" : "— none —"}</option>
             {coverLetters.map((d) => (
               <option key={d.id} value={d.id}>
-                {d.name}
+                {documentLabel(d, coverLetters)}
               </option>
             ))}
             <option value={UPLOAD_OPTION}>+ Upload new cover letter…</option>
