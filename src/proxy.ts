@@ -72,9 +72,13 @@ export function proxy(req: NextRequest) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Not signed in" }, { status: 401 });
     }
-    // Relative Location: behind a reverse proxy req.url can be the internal address.
-    const login = pathname === "/" ? "/login" : `/login?next=${encodeURIComponent(pathname + search)}`;
-    return new NextResponse(null, { status: 307, headers: { Location: login } });
+    // Proxy redirects must be absolute (Next parses Location with no base URL);
+    // Next rewrites same-host ones back to relative, so the internal address
+    // behind a reverse proxy doesn't leak into the Location header.
+    const login = req.nextUrl.clone();
+    login.pathname = "/login";
+    login.search = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname + search)}`;
+    return NextResponse.redirect(login);
   }
 
   return NextResponse.next();
