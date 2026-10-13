@@ -1,4 +1,4 @@
-import { mcpWriteEnabled, runWriteTool, ToolInputError, WRITE_TOOLS } from "./mcp-write";
+import { mcpWriteEnabled, runWriteTool, ToolInputError, WRITE_TOOLS, type FileDownloader } from "./mcp-write";
 import { getDocument, getJob, getPosting, listDocuments, listEvents, listJobs, pendingAfter } from "./queries";
 import { STATUSES, statusLabel, type DocumentKind, type Status, type StatusEvent } from "./types";
 
@@ -203,16 +203,21 @@ function toolError(text: string) {
   return { content: [{ type: "text", text }], isError: true };
 }
 
-function callTool(name: unknown, args: Record<string, unknown>) {
+/** Injectable for tests. */
+export interface McpDeps {
+  download?: FileDownloader;
+}
+
+async function callTool(name: unknown, args: Record<string, unknown>, deps: McpDeps) {
   try {
-    return runTool(name, args);
+    return await runTool(name, args, deps);
   } catch (err) {
     if (err instanceof ToolInputError) return toolError(err.message);
     throw err;
   }
 }
 
-function runTool(name: unknown, args: Record<string, unknown>) {
+async function runTool(name: unknown, args: Record<string, unknown>, deps: McpDeps) {
   switch (name) {
     case "list_applications": {
       const status = args.status as Status | undefined;
@@ -240,7 +245,10 @@ function runTool(name: unknown, args: Record<string, unknown>) {
   }
   if (typeof name === "string" && WRITE_TOOLS.some((t) => t.name === name)) {
     if (!mcpWriteEnabled()) return toolError("Editing is turned off on this server (JOBMANAGER_MCP_WRITE is not set).");
-    return result(getApplication(runWriteTool(name, args)!)!);
+    const done = (await runWriteTool(name, args, deps.download))!;
+    const application = done.applicationId !== null ? getApplication(done.applicationId) : null;
+    if (!done.document) return result(application!);
+    return result({ document: done.document, ...(application && { application }) });
   }
   throw new RpcError(-32602, `Unknown tool: ${String(name)}`);
 }
@@ -251,7 +259,7 @@ class RpcError extends Error {
   }
 }
 
-function dispatch(req: RpcRequest): unknown {
+async function dispatch(req: RpcRequest, deps: McpDeps): Promise<unknown> {
   switch (req.method) {
     case "initialize": {
       const asked = req.params?.protocolVersion;
@@ -260,7 +268,7 @@ function dispatch(req: RpcRequest): unknown {
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: "jobmanager", title: "JobManager", version: "1.0.0" },
         instructions: mcpWriteEnabled()
-          ? "The user's job-application tracker. Find applications with list_applications (search with query), read one with get_application, and edit with update_application, add_status_update and update_status_update. Confirm with the user before changing anything they didn't clearly ask for."
+          ? "The user's job-application tracker. Find applications with list_applications (search with query), read one with get_application, edit with update_application, add_status_update and update_status_update, and save an attached resume or cover letter with upload_document. Confirm with the user before changing anything they didn't clearly ask for."
           : "Read-only access to the user's job-application tracker. Find applications with list_applications (search with query) and read one with get_application.",
       };
     }
@@ -269,13 +277,13 @@ function dispatch(req: RpcRequest): unknown {
     case "tools/list":
       return { tools: tools() };
     case "tools/call":
-      return callTool(req.params?.name, (req.params?.arguments as Record<string, unknown>) ?? {});
+      return callTool(req.params?.name, (req.params?.arguments as Record<string, unknown>) ?? {}, deps);
     default:
       throw new RpcError(-32601, `Method not found: ${req.method}`);
   }
 }
 
-function handleOne(msg: unknown): RpcResponse | null {
+async function handleOne(msg: unknown, deps: McpDeps): Promise<RpcResponse | null> {
   const req = msg as RpcRequest;
   if (!req || typeof req !== "object" || req.jsonrpc !== "2.0" || typeof req.method !== "string") {
     return { jsonrpc: "2.0", id: (req as RpcRequest)?.id ?? null, error: { code: -32600, message: "Invalid request" } };
@@ -283,7 +291,7 @@ function handleOne(msg: unknown): RpcResponse | null {
   // Notifications (no id) and responses get no reply.
   if (req.id === undefined) return null;
   try {
-    return { jsonrpc: "2.0", id: req.id, result: dispatch(req) };
+    return { jsonrpc: "2.0", id: req.id, result: await dispatch(req, deps) };
   } catch (err) {
     const code = err instanceof RpcError ? err.code : -32603;
     return { jsonrpc: "2.0", id: req.id, error: { code, message: err instanceof Error ? err.message : String(err) } };
@@ -291,10 +299,14 @@ function handleOne(msg: unknown): RpcResponse | null {
 }
 
 /** One JSON-RPC message or a batch → the reply body, or null when nothing needs a reply (HTTP 202). */
-export function handleMcpMessage(body: unknown): RpcResponse | RpcResponse[] | null {
+export async function handleMcpMessage(body: unknown, deps: McpDeps = {}): Promise<RpcResponse | RpcResponse[] | null> {
   if (Array.isArray(body)) {
-    const out = body.map(handleOne).filter((r): r is RpcResponse => r !== null);
+    const out: RpcResponse[] = [];
+    for (const msg of body) {
+      const r = await handleOne(msg, deps);
+      if (r) out.push(r);
+    }
     return out.length ? out : null;
   }
-  return handleOne(body);
+  return handleOne(body, deps);
 }
