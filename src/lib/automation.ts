@@ -93,6 +93,7 @@ export const UNKNOWN_TITLE = "(title unknown)";
  * Adds links as hand-tracked applications, like the Add form: company, title and
  * description come from the posting page when it can be read, and no task is
  * queued (workflow_state stays NULL) — "automate" on the job starts the pipeline.
+ * Each starts with a "to apply" status.
  */
 export async function addUrlsManually(
   inputs: string[],
@@ -132,6 +133,7 @@ export async function addUrlsManually(
           ? { job_id: job.id, ...parsed, source: "parsed", fetch_status: "ok" }
           : { job_id: job.id, description_md: "", source: "parsed", fetch_status: "failed" }
       );
+      createEvent({ job_id: job.id, status: "to_apply" });
       return { input, outcome: "created", job_id: job.id, message: `${company} — ${title}` };
     }).immediate());
   }

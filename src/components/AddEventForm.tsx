@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { STATUSES, type Status } from "@/lib/types";
+import { STATUSES, statusName, type Status } from "@/lib/types";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/format";
 
 export default function AddEventForm({ jobId, nextRound }: { jobId: number; nextRound: number }) {
@@ -81,7 +81,7 @@ export default function AddEventForm({ jobId, nextRound }: { jobId: number; next
         <select value={status} onChange={(e) => setStatus(e.target.value as Status)} className={inputCls}>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
-              {s}
+              {statusName(s)}
             </option>
           ))}
         </select>

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { STATUSES, type Status } from "@/lib/types";
+import { STATUSES, statusName, type Status } from "@/lib/types";
 import { fromDatetimeLocal, toDatetimeLocal } from "@/lib/format";
 
 const now = () => toDatetimeLocal(new Date().toISOString());
@@ -152,7 +152,7 @@ export default function QuickStatus({ jobId, nextRound }: { jobId: number; nextR
       <option value="">Update…</option>
       {STATUSES.map((s) => (
         <option key={s} value={s}>
-          {s}
+          {statusName(s)}
         </option>
       ))}
     </select>

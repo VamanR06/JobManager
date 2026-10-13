@@ -1,5 +1,10 @@
-export const STATUSES = ["applied", "oa", "interview", "pending", "rejected", "accepted"] as const;
+export const STATUSES = ["to_apply", "applied", "oa", "interview", "pending", "rejected", "accepted"] as const;
 export type Status = (typeof STATUSES)[number];
+
+/** Status as shown in dropdowns: "to_apply" → "to apply". */
+export function statusName(s: Status): string {
+  return s.replace(/_/g, " ");
+}
 
 export interface Job {
   id: number;
@@ -107,6 +112,8 @@ export function stageWindow(event: StatusEvent): { start: string; end: string } 
 export function statusLabel(event: StatusEvent | null, pendingAfter: StatusEvent | null): string {
   if (!event) return "No status";
   switch (event.status) {
+    case "to_apply":
+      return "To apply";
     case "applied":
       return "Applied";
     case "oa":

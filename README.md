@@ -64,7 +64,8 @@ jobs.example.com {
 
 An iOS Shortcut can send whatever you share (a job link, or a caption or message with links in it)
 to `POST /api/import/inbox`. Each link is added to the applications list the same way the Add form does it:
-company, title and description come from the posting page when it can be read. Nothing is queued for
+company, title and description come from the posting page when it can be read, and its status starts
+as **To apply** (click the company or title on the job page to fix either). Nothing is queued for
 automation; to generate a resume, use **automate** on the job.
 
 1. `npm run inbox:token` and put the printed `JOBMANAGER_INBOX_TOKEN=…` line in the server's `.env.local`,

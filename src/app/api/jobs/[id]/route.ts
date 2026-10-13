@@ -9,7 +9,16 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const job = updateJob(Number((await params).id), await req.json());
+  const body = await req.json();
+  // Company and title can be renamed but never blanked.
+  for (const field of ["company", "title"] as const) {
+    if (body[field] === undefined) continue;
+    if (typeof body[field] !== "string" || !body[field].trim()) {
+      return NextResponse.json({ error: `${field} can't be empty` }, { status: 400 });
+    }
+    body[field] = body[field].trim();
+  }
+  const job = updateJob(Number((await params).id), body);
   return job ? NextResponse.json(job) : NextResponse.json({ error: "Not found" }, { status: 404 });
 }
 
