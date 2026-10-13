@@ -4,6 +4,7 @@ import { createEvent, createJob, getJob, getPosting, updateJob, upsertPosting } 
 import { enqueue, logEvent } from "./queue";
 import { analyzeUrl, splitPastedUrls } from "./urls";
 import type { ExtractedPosting } from "./extract";
+import { parsePostingUrl, type ParsedPosting } from "./parser";
 import type { Job } from "./types";
 import type {
   ApplicationField, CodexRun, JobSnapshot, ProfileFact, QueueRow, ResumeArtifact, ResumeEngineName, Task, WorkflowEvent,
@@ -83,6 +84,58 @@ export function importUrls(inputs: string[]): ImportResult[] {
       return { input, outcome: "created", job_id: job.id };
     }).immediate();
   });
+}
+
+/** Title for a hand-added job whose posting page couldn't be read. */
+export const UNKNOWN_TITLE = "(title unknown)";
+
+/**
+ * Adds links as hand-tracked applications, like the Add form: company, title and
+ * description come from the posting page when it can be read, and no task is
+ * queued (workflow_state stays NULL) — "automate" on the job starts the pipeline.
+ */
+export async function addUrlsManually(
+  inputs: string[],
+  parse: (url: string) => Promise<ParsedPosting> = parsePostingUrl
+): Promise<ImportResult[]> {
+  const db = getDb();
+  const out: ImportResult[] = [];
+  for (const input of inputs) {
+    const info = analyzeUrl(input);
+    if (!info.ok) {
+      out.push({ input, outcome: info.reason, message: info.message });
+      continue;
+    }
+    const dupe = findByKey(info.key);
+    if (dupe) {
+      out.push({ input, outcome: "duplicate", job_id: dupe.id, message: `${dupe.company} — ${dupe.title}` });
+      continue;
+    }
+    let parsed: ParsedPosting | null = null;
+    try {
+      parsed = await parse(info.normalized);
+    } catch {
+      // Still added; the job page offers editing the description by hand.
+    }
+    // Dedup is re-checked inside the insert transaction: the fetch above awaited.
+    out.push(db.transaction((): ImportResult => {
+      const existing = findByKey(info.key);
+      if (existing) return { input, outcome: "duplicate", job_id: existing.id, message: `${existing.company} — ${existing.title}` };
+      const company = parsed?.company?.trim() || placeholderCompany(info);
+      const title = parsed?.title?.trim() || UNKNOWN_TITLE;
+      const job = createJob({ company, title, url: info.normalized });
+      db.prepare("UPDATE jobs SET ats = ?, ats_tenant = ?, posting_id = ?, posting_key = ? WHERE id = ?").run(
+        info.ats, info.tenant, info.postingId, info.key, job.id
+      );
+      upsertPosting(
+        parsed
+          ? { job_id: job.id, ...parsed, source: "parsed", fetch_status: "ok" }
+          : { job_id: job.id, description_md: "", source: "parsed", fetch_status: "failed" }
+      );
+      return { input, outcome: "created", job_id: job.id, message: `${company} — ${title}` };
+    }).immediate());
+  }
+  return out;
 }
 
 // ---------- snapshots ----------

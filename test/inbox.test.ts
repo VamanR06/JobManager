@@ -3,7 +3,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { generateInboxToken, hashPassword, INBOX_PATH, inboxAuthorized } from "../src/lib/auth";
+import { importUrls, UNKNOWN_TITLE } from "../src/lib/automation";
+import { getDb } from "../src/lib/db";
 import { importSharedText, linksInText } from "../src/lib/inbox";
+import type { ParsedPosting } from "../src/lib/parser";
+import { getJob, getPosting } from "../src/lib/queries";
 import { proxy } from "../src/proxy";
 
 const TOKEN = generateInboxToken();
@@ -28,18 +32,46 @@ test("only links are taken from shared text", () => {
   assert.deepEqual(linksInText("no links here, just a caption"), []);
 });
 
-test("shared text imports job links and skips social posts", () => {
-  const out = importSharedText("https://boards.greenhouse.io/inboxco/jobs/77");
+const parse = async (): Promise<ParsedPosting> => ({
+  title: "Backend Intern", company: "Inbox Co", location: "Remote", description_md: "Build things.",
+});
+const failParse = async (): Promise<ParsedPosting> => {
+  throw new Error("Fetch failed: HTTP 403");
+};
+
+test("shared links go on the applications list without queueing automation", async () => {
+  const out = await importSharedText("Apply here https://boards.greenhouse.io/inboxco/jobs/77 !", parse);
   assert.equal(out.results[0].outcome, "created");
-  assert.equal(out.message, "Added 1 job");
+  assert.equal(out.message, "Added: Inbox Co — Backend Intern");
+  const id = out.results[0].job_id!;
+  const job = getJob(id)!;
+  assert.equal(job.company, "Inbox Co");
+  assert.equal(job.title, "Backend Intern");
+  const db = getDb();
+  const row = db.prepare("SELECT workflow_state FROM jobs WHERE id = ?").get(id) as { workflow_state: string | null };
+  assert.equal(row.workflow_state, null, "hand-tracked, not in the pipeline");
+  const tasks = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE job_id = ?").get(id) as { n: number };
+  assert.equal(tasks.n, 0, "nothing queued");
+  assert.equal(getPosting(id)!.description_md, "Build things.");
 
-  assert.equal(importSharedText("https://boards.greenhouse.io/inboxco/jobs/77").results[0].outcome, "duplicate");
+  const again = await importSharedText("https://boards.greenhouse.io/inboxco/jobs/77", parse);
+  assert.equal(again.results[0].outcome, "duplicate");
+  assert.equal(importUrls(["https://boards.greenhouse.io/inboxco/jobs/77"])[0].outcome, "duplicate", "Import page sees it too");
+});
 
-  const ig = importSharedText("https://www.instagram.com/p/AbC123/?igsh=xyz");
+test("an unreadable page still adds the job with placeholders", async () => {
+  const out = await importSharedText("https://boards.greenhouse.io/acme-corp/jobs/123", failParse);
+  const job = getJob(out.results[0].job_id!)!;
+  assert.equal(job.company, "Acme Corp");
+  assert.equal(job.title, UNKNOWN_TITLE);
+  assert.equal(getPosting(job.id)!.fetch_status, "failed");
+});
+
+test("social posts are skipped and captions without links are reported", async () => {
+  const ig = await importSharedText("https://www.instagram.com/p/AbC123/?igsh=xyz", parse);
   assert.equal(ig.results[0].outcome, "unsupported");
   assert.match(ig.message, /^Skipped: Social post/);
-
-  assert.equal(importSharedText("just words").message, "No link found in what was shared");
+  assert.equal((await importSharedText("just words", parse)).message, "No link found in what was shared");
 });
 
 function req(headers: Record<string, string>, path = INBOX_PATH) {
