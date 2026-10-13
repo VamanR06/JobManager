@@ -34,32 +34,52 @@ test("initialize, tools/list and notifications", () => {
   assert.equal(rpc("initialize", { protocolVersion: "1999-01-01" })!.result.protocolVersion, "2025-11-25");
   assert.equal(rpc("notifications/initialized", undefined, true), null);
   const tools = rpc("tools/list")!.result.tools;
-  assert.deepEqual(tools.map((t: { name: string }) => t.name), ["list_applications"]);
-  assert.equal(tools[0].annotations.readOnlyHint, true);
+  assert.deepEqual(tools.map((t: { name: string }) => t.name), ["list_applications", "get_application"]);
+  assert.ok(tools.every((t: { annotations: { readOnlyHint: boolean } }) => t.annotations.readOnlyHint));
   assert.equal(rpc("tools/delete_everything")!.error.code, -32601);
   assert.equal((handleMcpMessage({ nope: true }) as any).error.code, -32600);
 });
 
-test("list_applications returns jobs by current status, to_apply by default", () => {
-  const todo = createJob({ company: "Mcp Co", title: "SWE Intern", url: "https://jobs.example.com/1" });
-  createEvent({ job_id: todo.id, status: "to_apply" });
-  const done = createJob({ company: "Done Co", title: "SWE" });
-  createEvent({ job_id: done.id, status: "to_apply", occurred_at: "2026-01-01T00:00:00.000Z" });
-  createEvent({ job_id: done.id, status: "applied", occurred_at: "2026-01-02T00:00:00.000Z" });
+const todo = createJob({ company: "Mcp Co", title: "SWE Intern", url: "https://jobs.example.com/1", notes: "referral from Sam" });
+createEvent({ job_id: todo.id, status: "to_apply" });
+const done = createJob({ company: "Done Co", title: "SWE" });
+createEvent({ job_id: done.id, status: "to_apply", occurred_at: "2026-01-01T00:00:00.000Z" });
+createEvent({ job_id: done.id, status: "applied", occurred_at: "2026-01-02T00:00:00.000Z" });
+createEvent({ job_id: done.id, status: "pending", occurred_at: "2026-01-03T00:00:00.000Z" });
 
-  const res = rpc("tools/call", { name: "list_applications", arguments: {} })!.result;
-  const ids = res.structuredContent.applications.map((a: { id: number }) => a.id);
-  assert.ok(ids.includes(todo.id));
-  assert.ok(!ids.includes(done.id), "moved on to applied");
-  const row = res.structuredContent.applications.find((a: { id: number }) => a.id === todo.id);
+function call(name: string, args: Record<string, unknown>) {
+  return rpc("tools/call", { name, arguments: args })!.result;
+}
+const idsOf = (res: any) => res.structuredContent.applications.map((a: { id: number }) => a.id);
+
+test("list_applications returns everything without a filter, or only the given current status", () => {
+  const all = call("list_applications", {});
+  assert.ok(idsOf(all).includes(todo.id));
+  assert.ok(idsOf(all).includes(done.id));
+  assert.equal(JSON.parse(all.content[0].text).count, all.structuredContent.count);
+  const row = all.structuredContent.applications.find((a: { id: number }) => a.id === todo.id);
   assert.equal(row.company, "Mcp Co");
   assert.equal(row.status, "To apply");
   assert.equal(row.url, "https://jobs.example.com/1");
-  assert.equal(JSON.parse(res.content[0].text).count, res.structuredContent.count);
 
-  const applied = rpc("tools/call", { name: "list_applications", arguments: { status: "applied" } })!.result;
-  assert.ok(applied.structuredContent.applications.some((a: { id: number }) => a.id === done.id));
-  assert.equal(rpc("tools/call", { name: "list_applications", arguments: { status: "bogus" } })!.result.isError, true);
+  const toApply = call("list_applications", { status: "to_apply" });
+  assert.ok(idsOf(toApply).includes(todo.id));
+  assert.ok(!idsOf(toApply).includes(done.id), "moved on past to_apply");
+  assert.ok(idsOf(call("list_applications", { status: "pending" })).includes(done.id));
+  assert.equal(call("list_applications", { status: "bogus" }).isError, true);
+});
+
+test("get_application returns one application with its history", () => {
+  const app = call("get_application", { id: done.id }).structuredContent;
+  assert.equal(app.company, "Done Co");
+  assert.equal(app.status, "Pending — after Applied");
+  assert.deepEqual(app.history.map((h: { label: string }) => h.label), ["Pending — after Applied", "Applied", "To apply"]);
+  assert.equal(app.history[0].job_id, undefined);
+  assert.equal(app.posting, null);
+
+  assert.equal(call("get_application", { id: todo.id }).structuredContent.notes, "referral from Sam");
+  assert.equal(call("get_application", { id: 999_999 }).isError, true);
+  assert.equal(call("get_application", {}).isError, true);
 });
 
 function req(path: string, headers: Record<string, string> = {}, body?: string) {
