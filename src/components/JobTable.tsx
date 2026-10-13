@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { STATUSES, statusLabel, type JobWithStatus, type Status } from "@/lib/types";
+import { STATUSES, statusLabel, statusName, type JobWithStatus, type Status } from "@/lib/types";
 import { formatAgo } from "@/lib/format";
 import StatusBadge from "./StatusBadge";
 import QuickStatus from "./QuickStatus";
@@ -45,7 +45,7 @@ export default function JobTable({ jobs, nextRounds }: Props) {
           <option value="">All statuses</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
-              {s}
+              {statusName(s)}
             </option>
           ))}
         </select>

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { STATUSES, type AppDocument, type DocumentKind, type Status } from "@/lib/types";
+import { STATUSES, statusName, type AppDocument, type DocumentKind, type Status } from "@/lib/types";
 import { documentLabel, fromDatetimeLocal, toDatetimeLocal } from "@/lib/format";
 
 interface ParsedPosting {
@@ -231,7 +231,7 @@ export default function AddJobForm({ resumes: allResumes, coverLetters: allCover
           <option value="">No initial status</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
-              Initial status: {s}
+              Initial status: {statusName(s)}
             </option>
           ))}
         </select>

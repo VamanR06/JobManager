@@ -7,7 +7,7 @@ import { importUrls, UNKNOWN_TITLE } from "../src/lib/automation";
 import { getDb } from "../src/lib/db";
 import { importSharedText, linksInText } from "../src/lib/inbox";
 import type { ParsedPosting } from "../src/lib/parser";
-import { getJob, getPosting } from "../src/lib/queries";
+import { getJob, getPosting, listJobs } from "../src/lib/queries";
 import { proxy } from "../src/proxy";
 
 const TOKEN = generateInboxToken();
@@ -53,6 +53,7 @@ test("shared links go on the applications list without queueing automation", asy
   const tasks = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE job_id = ?").get(id) as { n: number };
   assert.equal(tasks.n, 0, "nothing queued");
   assert.equal(getPosting(id)!.description_md, "Build things.");
+  assert.equal(listJobs().find((j) => j.id === id)!.latest_event?.status, "to_apply", "marked to apply");
 
   const again = await importSharedText("https://boards.greenhouse.io/inboxco/jobs/77", parse);
   assert.equal(again.results[0].outcome, "duplicate");

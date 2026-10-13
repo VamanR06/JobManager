@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE TABLE IF NOT EXISTS status_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
-  status TEXT NOT NULL CHECK (status IN ('applied','oa','interview','pending','rejected','accepted')),
+  status TEXT NOT NULL CHECK (status IN ('to_apply','applied','oa','interview','pending','rejected','accepted')),
   interview_round INTEGER,
   oa_score TEXT,
   oa_sent_at TEXT,
@@ -168,7 +168,7 @@ function open(): Database.Database {
 // database is backed up with VACUUM INTO, which is SQLite-aware (it includes
 // committed WAL content, unlike copying app.db alone).
 
-const MIGRATIONS: { version: number; name: string; up: (db: Database.Database) => void }[] = [
+const MIGRATIONS: { version: number; name: string; foreignKeysOff?: boolean; up: (db: Database.Database) => void }[] = [
   {
     version: 1,
     name: "application automation: import, queue, snapshots, Codex runs, artifacts, profile",
@@ -415,6 +415,43 @@ const MIGRATIONS: { version: number; name: string; up: (db: Database.Database) =
       }
     },
   },
+  {
+    version: 6,
+    name: "'to apply' status (rebuilds status_events to widen its CHECK)",
+    // Dropping the old table with foreign keys on would cascade-delete recordings.
+    foreignKeysOff: true,
+    up(db) {
+      const cols = [
+        "id", "job_id", "status", "interview_round", "oa_score", "oa_sent_at", "oa_submitted_at", "oa_deadline_at",
+        "oa_link", "interview_offered_at", "interview_held_at", "interview_link", "pre_notes", "post_notes",
+        "occurred_at", "created_at",
+      ].join(", ");
+      db.exec(`
+        CREATE TABLE status_events_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+          status TEXT NOT NULL CHECK (status IN ('to_apply','applied','oa','interview','pending','rejected','accepted')),
+          interview_round INTEGER,
+          oa_score TEXT,
+          oa_sent_at TEXT,
+          oa_submitted_at TEXT,
+          oa_deadline_at TEXT,
+          oa_link TEXT,
+          interview_offered_at TEXT,
+          interview_held_at TEXT,
+          interview_link TEXT,
+          pre_notes TEXT NOT NULL DEFAULT '',
+          post_notes TEXT NOT NULL DEFAULT '',
+          occurred_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+        INSERT INTO status_events_new (${cols}) SELECT ${cols} FROM status_events;
+        DROP TABLE status_events;
+        ALTER TABLE status_events_new RENAME TO status_events;
+        CREATE INDEX idx_status_events_job ON status_events(job_id, occurred_at, id);
+      `);
+    },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;
@@ -433,6 +470,11 @@ function runVersionedMigrations(db: Database.Database): void {
     db.prepare("VACUUM INTO ?").run(target);
   }
 
+  // Table rebuilds need foreign keys off, which SQLite only allows outside a
+  // transaction; the references are re-checked before committing instead.
+  const fkOff = MIGRATIONS.some((m) => m.version > current && m.foreignKeysOff);
+  if (fkOff) db.pragma("foreign_keys = OFF");
+
   // IMMEDIATE takes the write lock up front, then re-reads the version so a
   // second process that waited on the lock doesn't re-apply the same steps.
   db.exec("BEGIN IMMEDIATE");
@@ -443,10 +485,16 @@ function runVersionedMigrations(db: Database.Database): void {
       m.up(db);
       db.pragma(`user_version = ${m.version}`);
     }
+    if (fkOff) {
+      const broken = db.pragma("foreign_key_check") as unknown[];
+      if (broken.length) throw new Error(`Migration left ${broken.length} broken foreign key reference(s)`);
+    }
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
     throw err;
+  } finally {
+    if (fkOff) db.pragma("foreign_keys = ON");
   }
 }
 
