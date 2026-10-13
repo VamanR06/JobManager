@@ -22,16 +22,22 @@ type RpcResponse =
   | { jsonrpc: "2.0"; id: Id; result: unknown }
   | { jsonrpc: "2.0"; id: Id; error: { code: number; message: string } };
 
+/** Rows list_applications returns unless asked for more, and the most it will return. */
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 500;
+
 const TOOLS = [
   {
     name: "list_applications",
     title: "List job applications",
     description:
-      'Lists tracked job applications, newest first: all of them, or only those whose current status matches `status` ("to_apply" = saved but not yet applied to). Each has id, company, title, current status, posting URL, location, when it was added and when it reached that status. Use get_application with an id for full details.',
+      'Lists or searches tracked job applications, newest first. Filter by current `status` ("to_apply" = saved but not yet applied to) and/or search with `query` (matches company, title and posting URL; every word must match). With neither, lists everything. Each has id, company, title, current status, posting URL, location, when it was added and when it reached that status. To find a specific application, search with `query`, then call get_application with its id for full details.',
     inputSchema: {
       type: "object",
       properties: {
-        status: { type: "string", enum: [...STATUSES], description: "Current status to filter by. Omit for all applications." },
+        status: { type: "string", enum: [...STATUSES], description: "Current status to filter by. Omit for any status." },
+        query: { type: "string", description: 'Search words, e.g. "stripe" or "google intern". Case-insensitive.' },
+        limit: { type: "integer", minimum: 1, maximum: MAX_LIMIT, default: DEFAULT_LIMIT, description: "Max rows to return (newest first)." },
       },
       additionalProperties: false,
     },
@@ -63,10 +69,20 @@ export interface ApplicationSummary {
   status_since: string | null;
 }
 
-/** Every application, or only those whose current status is `status`. */
-export function listApplications(status?: Status): ApplicationSummary[] {
+/**
+ * Applications, newest first, optionally narrowed to a current `status` and/or a
+ * `query` whose every word must appear (case-insensitively) in the company,
+ * title or posting URL.
+ */
+export function listApplications(filter: { status?: Status; query?: string } = {}): ApplicationSummary[] {
+  const words = (filter.query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
   return listJobs()
-    .filter((j) => !status || j.latest_event?.status === status)
+    .filter((j) => !filter.status || j.latest_event?.status === filter.status)
+    .filter((j) => {
+      if (!words.length) return true;
+      const hay = `${j.company} ${j.title} ${j.url ?? ""}`.toLowerCase();
+      return words.every((w) => hay.includes(w));
+    })
     .map((j) => ({
       id: j.id,
       company: j.company,
@@ -112,7 +128,8 @@ export function getApplication(id: number) {
 }
 
 function result(data: Record<string, unknown>) {
-  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], structuredContent: data };
+  // Compact JSON: list results can run to hundreds of rows.
+  return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
 }
 
 function toolError(text: string) {
@@ -126,8 +143,21 @@ function callTool(name: unknown, args: Record<string, unknown>) {
       if (status !== undefined && !STATUSES.includes(status)) {
         return toolError(`Unknown status "${String(status)}". Use one of: ${STATUSES.join(", ")}, or omit it for all.`);
       }
-      const applications = listApplications(status);
-      return result({ count: applications.length, applications });
+      if (args.query !== undefined && typeof args.query !== "string") return toolError("query must be a string.");
+      const limit = args.limit === undefined ? DEFAULT_LIMIT : Number(args.limit);
+      if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
+        return toolError(`limit must be an integer from 1 to ${MAX_LIMIT}.`);
+      }
+      const matches = listApplications({ status, query: args.query as string | undefined });
+      const applications = matches.slice(0, limit);
+      return result({
+        total: matches.length,
+        count: applications.length,
+        ...(matches.length > limit && {
+          truncated: `Showing the newest ${limit} of ${matches.length}. Narrow with status/query, or raise limit (max ${MAX_LIMIT}).`,
+        }),
+        applications,
+      });
     }
     case "get_application": {
       const id = Number(args.id);

@@ -93,8 +93,10 @@ automation; to generate a resume, use **automate** on the job.
 A small read-only [MCP](https://modelcontextprotocol.io) server lives at `/api/mcp/<token>`. It has
 two tools, and neither can change anything:
 
-- `list_applications` returns every application, or only those with a given current `status` (e.g.
-  `to_apply`), with id, company, title, status, posting link, location and dates.
+- `list_applications` lists or searches applications, newest first, with id, company, title, status,
+  posting link, location and dates. Optional `status` (e.g. `to_apply`) filters by current status,
+  `query` searches company, title and posting URL (every word must match), and `limit` caps the rows
+  (default 50, max 500; the result says when it was cut short).
 - `get_application` takes an `id` and returns that application in full: notes, the saved posting
   (location and description), its status history (OA scores and dates, interview rounds, notes), and
   which resume and cover letter it used.
