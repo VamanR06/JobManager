@@ -21,7 +21,7 @@ Don't start `npm run worker` or `npm run codex:smoke` against the real data unle
 - `src/lib/queue.ts`, `automation.ts`, `steps.ts`, `codex/*` — application automation (import → extract → Resume Builder via Codex → review)
 - `src/lib/apply/*` — form filling: `scan.ts` (in-page reader), `answers.ts` (classification + answer bank), `fill.ts` (adapter; no submit), `browser.ts` (dedicated profile + navigation guard)
 - `worker/index.ts` — the automation worker
-- `src/proxy.ts` + `src/lib/auth.ts` — request guard: password/session gate when `JOBMANAGER_PASSWORD_HASH` is set, otherwise loopback-host check; same-origin check on writes either way. `/login` and `/api/auth/login` are the only public paths. `/api/import/inbox` (iOS share-sheet Shortcut) skips all of that and instead requires `JOBMANAGER_INBOX_TOKEN` as a bearer token. `/api/mcp/<token>` (read-only MCP server for ChatGPT, `src/lib/mcp.ts`) likewise skips it and requires `JOBMANAGER_MCP_TOKEN` in the path; keep it read-only.
+- `src/proxy.ts` + `src/lib/auth.ts` — request guard: password/session gate when `JOBMANAGER_PASSWORD_HASH` is set, otherwise loopback-host check; same-origin check on writes either way. `/login` and `/api/auth/login` are the only public paths. `/api/import/inbox` (iOS share-sheet Shortcut) skips all of that and instead requires `JOBMANAGER_INBOX_TOKEN` as a bearer token. `/api/mcp/<token>` (MCP server for ChatGPT, `src/lib/mcp.ts`) likewise skips it and requires `JOBMANAGER_MCP_TOKEN` in the path. It's read-only unless `JOBMANAGER_MCP_WRITE=1` turns on the edit tools in `src/lib/mcp-write.ts`; keep write tools behind that flag and don't add delete tools.
 - `data/` — gitignored: SQLite DB, uploaded documents, recordings, resume artifacts, DB backups
 
 ## Notes
