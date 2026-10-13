@@ -1,5 +1,5 @@
-import { getPosting, listJobs } from "./queries";
-import { STATUSES, statusLabel, type Status } from "./types";
+import { getDocument, getJob, getPosting, listEvents, listJobs, pendingAfter } from "./queries";
+import { STATUSES, statusLabel, type Status, type StatusEvent } from "./types";
 
 /**
  * A minimal, read-only MCP server (Streamable HTTP, stateless, plain JSON
@@ -27,12 +27,25 @@ const TOOLS = [
     name: "list_applications",
     title: "List job applications",
     description:
-      'Lists tracked job applications whose current status matches `status` (default "to_apply": jobs saved but not yet applied to), newest first. Each has company, title, posting URL, location, when it was added and when it reached that status.',
+      'Lists tracked job applications, newest first: all of them, or only those whose current status matches `status` ("to_apply" = saved but not yet applied to). Each has id, company, title, current status, posting URL, location, when it was added and when it reached that status. Use get_application with an id for full details.',
     inputSchema: {
       type: "object",
       properties: {
-        status: { type: "string", enum: [...STATUSES], default: "to_apply", description: "Current status to filter by." },
+        status: { type: "string", enum: [...STATUSES], description: "Current status to filter by. Omit for all applications." },
       },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: "get_application",
+    title: "Get a job application",
+    description:
+      "Full details of one tracked application by id (from list_applications): company, title, posting URL, notes, current status, the posting (location and description), status history newest first (OA scores and dates, interview rounds and dates, notes), and the names of the resume and cover letter used.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "integer", description: "Application id from list_applications." } },
+      required: ["id"],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -50,9 +63,10 @@ export interface ApplicationSummary {
   status_since: string | null;
 }
 
-export function listApplications(status: Status): ApplicationSummary[] {
+/** Every application, or only those whose current status is `status`. */
+export function listApplications(status?: Status): ApplicationSummary[] {
   return listJobs()
-    .filter((j) => j.latest_event?.status === status)
+    .filter((j) => !status || j.latest_event?.status === status)
     .map((j) => ({
       id: j.id,
       company: j.company,
@@ -65,17 +79,65 @@ export function listApplications(status: Status): ApplicationSummary[] {
     }));
 }
 
-function callTool(name: unknown, args: Record<string, unknown>) {
-  if (name !== "list_applications") throw new RpcError(-32602, `Unknown tool: ${String(name)}`);
-  const status = (args.status ?? "to_apply") as Status;
-  if (!STATUSES.includes(status)) {
-    return { content: [{ type: "text", text: `Unknown status "${String(args.status)}". Use one of: ${STATUSES.join(", ")}.` }], isError: true };
-  }
-  const applications = listApplications(status);
+/** One application with its posting, status history and linked documents; null if no such id. */
+export function getApplication(id: number) {
+  const job = getJob(id);
+  if (!job) return null;
+  const events = listEvents(id);
+  const posting = getPosting(id);
+  const docName = (docId: number | null) => (docId ? getDocument(docId)?.name ?? null : null);
   return {
-    content: [{ type: "text", text: JSON.stringify({ count: applications.length, applications }, null, 2) }],
-    structuredContent: { count: applications.length, applications },
+    id: job.id,
+    company: job.company,
+    title: job.title,
+    url: job.url,
+    notes: job.notes,
+    added_at: job.created_at,
+    status: statusLabel(events[0] ?? null, pendingAfter(events[0] ?? null)),
+    resume: docName(job.resume_id),
+    cover_letter: docName(job.cover_letter_id),
+    posting: posting && {
+      title: posting.title,
+      company: posting.company,
+      location: posting.location,
+      description_md: posting.description_md,
+      fetch_status: posting.fetch_status,
+      fetched_at: posting.fetched_at,
+    },
+    history: events.map((e: StatusEvent) => {
+      const { job_id: _job, created_at: _created, ...rest } = e;
+      return { label: statusLabel(e, pendingAfter(e)), ...rest };
+    }),
   };
+}
+
+function result(data: Record<string, unknown>) {
+  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }], structuredContent: data };
+}
+
+function toolError(text: string) {
+  return { content: [{ type: "text", text }], isError: true };
+}
+
+function callTool(name: unknown, args: Record<string, unknown>) {
+  switch (name) {
+    case "list_applications": {
+      const status = args.status as Status | undefined;
+      if (status !== undefined && !STATUSES.includes(status)) {
+        return toolError(`Unknown status "${String(status)}". Use one of: ${STATUSES.join(", ")}, or omit it for all.`);
+      }
+      const applications = listApplications(status);
+      return result({ count: applications.length, applications });
+    }
+    case "get_application": {
+      const id = Number(args.id);
+      if (!Number.isInteger(id)) return toolError("id must be an integer application id from list_applications.");
+      const application = getApplication(id);
+      return application ? result(application) : toolError(`No application with id ${id}.`);
+    }
+    default:
+      throw new RpcError(-32602, `Unknown tool: ${String(name)}`);
+  }
 }
 
 class RpcError extends Error {

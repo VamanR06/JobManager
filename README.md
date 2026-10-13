@@ -90,9 +90,15 @@ automation; to generate a resume, use **automate** on the job.
 
 ## Reading the list from ChatGPT (MCP)
 
-A small read-only [MCP](https://modelcontextprotocol.io) server lives at `/api/mcp/<token>`. Its one
-tool, `list_applications`, returns jobs by current status (default **To apply**) with company, title,
-posting link, location and dates. It can't change anything. A ChatGPT scheduled task can use it to
+A small read-only [MCP](https://modelcontextprotocol.io) server lives at `/api/mcp/<token>`. It has
+two tools, and neither can change anything:
+
+- `list_applications` returns every application, or only those with a given current `status` (e.g.
+  `to_apply`), with id, company, title, status, posting link, location and dates.
+- `get_application` takes an `id` and returns that application in full: notes, the saved posting
+  (location and description), its status history (OA scores and dates, interview rounds, notes), and
+  which resume and cover letter it used.
+ A ChatGPT scheduled task can use it to
 send you the to-apply list each morning. Custom GPT Actions can't run in scheduled tasks, but connected
 apps (including custom MCP connectors) can.
 
