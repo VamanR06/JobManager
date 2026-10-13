@@ -34,7 +34,7 @@ test("initialize, tools/list and notifications", () => {
   assert.equal(rpc("initialize", { protocolVersion: "1999-01-01" })!.result.protocolVersion, "2025-11-25");
   assert.equal(rpc("notifications/initialized", undefined, true), null);
   const tools = rpc("tools/list")!.result.tools;
-  assert.deepEqual(tools.map((t: { name: string }) => t.name), ["list_applications", "get_application"]);
+  assert.deepEqual(tools.map((t: { name: string }) => t.name), ["list_applications", "get_application", "list_documents"], "read-only by default");
   assert.ok(tools.every((t: { annotations: { readOnlyHint: boolean } }) => t.annotations.readOnlyHint));
   assert.equal(rpc("tools/delete_everything")!.error.code, -32601);
   assert.equal((handleMcpMessage({ nope: true }) as any).error.code, -32600);

@@ -88,21 +88,34 @@ automation; to generate a resume, use **automate** on the job.
   `curl -X POST https://<host>/api/import/inbox -H "Authorization: Bearer <token>" -d 'https://…'`
   tests it without the phone.
 
-## Reading the list from ChatGPT (MCP)
+## Using it from ChatGPT (MCP)
 
-A small read-only [MCP](https://modelcontextprotocol.io) server lives at `/api/mcp/<token>`. It has
-two tools, and neither can change anything:
+A small [MCP](https://modelcontextprotocol.io) server lives at `/api/mcp/<token>`. By default it's
+read-only:
 
 - `list_applications` lists or searches applications, newest first, with id, company, title, status,
   posting link, location and dates. Optional `status` (e.g. `to_apply`) filters by current status,
   `query` searches company, title and posting URL (every word must match), and `limit` caps the rows
   (default 50, max 500; the result says when it was cut short).
 - `get_application` takes an `id` and returns that application in full: notes, the saved posting
-  (location and description), its status history (OA scores and dates, interview rounds, notes), and
-  which resume and cover letter it used.
- A ChatGPT scheduled task can use it to
-send you the to-apply list each morning. Custom GPT Actions can't run in scheduled tasks, but connected
-apps (including custom MCP connectors) can.
+  (location and description), its status history (each event with its id, OA scores and dates,
+  interview rounds, notes), and which resume and cover letter it used.
+- `list_documents` lists or searches resumes and cover letters (archived ones only on request).
+
+Set `JOBMANAGER_MCP_WRITE=1` to also allow edits. Nothing can be deleted this way:
+
+- `update_application` changes company, title, posting URL, general notes (`notes` replaces them,
+  `append_notes` adds a paragraph) and the linked resume / cover letter. Only the fields passed change.
+- `add_status_update` adds a status (OA, interview, rejected…) with its fields: dates, score, round,
+  links, before/after notes. The newest one becomes the current status.
+- `update_status_update` edits any field of an existing status event; `null` clears one.
+
+Dates must be ISO 8601 with a timezone (e.g. `2026-10-14T15:00:00-04:00`) and are stored in UTC.
+
+A ChatGPT scheduled task can use it to send you the to-apply list each morning. Custom GPT Actions
+can't run in scheduled tasks, but connected apps (including custom MCP connectors) can. Whether
+ChatGPT lets a custom connector use write tools depends on your plan: some plans only allow
+read-only tools, and ChatGPT asks you to confirm each write.
 
 1. `npm run mcp:token` and put the printed `JOBMANAGER_MCP_TOKEN=…` line in the server's `.env.local`,
    then restart the app.
@@ -114,7 +127,8 @@ apps (including custom MCP connectors) can.
 
 - ChatGPT custom connectors can only use OAuth or no auth (they can't send a fixed header), so the
   token goes in the URL instead. The token is the only check on `/api/mcp/…`, and it opens nothing else.
-  Running `npm run mcp:token` again and swapping the value revokes the old URL. Clients that can send
+  With `JOBMANAGER_MCP_WRITE=1`, anyone with the URL can also edit your applications, so keep it
+  private. Running `npm run mcp:token` again and swapping the value revokes the old URL. Clients that can send
   headers can instead POST to `/api/mcp` with `Authorization: Bearer <token>`.
 - ChatGPT calls from OpenAI's servers, so this needs the deployed app over HTTPS.
   `curl -X POST https://<host>/api/mcp/<token> -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_applications","arguments":{}}}'`

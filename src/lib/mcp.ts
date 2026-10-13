@@ -1,12 +1,14 @@
-import { getDocument, getJob, getPosting, listEvents, listJobs, pendingAfter } from "./queries";
-import { STATUSES, statusLabel, type Status, type StatusEvent } from "./types";
+import { mcpWriteEnabled, runWriteTool, ToolInputError, WRITE_TOOLS } from "./mcp-write";
+import { getDocument, getJob, getPosting, listDocuments, listEvents, listJobs, pendingAfter } from "./queries";
+import { STATUSES, statusLabel, type DocumentKind, type Status, type StatusEvent } from "./types";
 
 /**
- * A minimal, read-only MCP server (Streamable HTTP, stateless, plain JSON
- * responses — no SSE) so ChatGPT scheduled tasks and other MCP clients can read
+ * A minimal MCP server (Streamable HTTP, stateless, plain JSON responses — no
+ * SSE) so ChatGPT (including scheduled tasks) and other MCP clients can read
  * the applications list. Served at /api/mcp/<token>; see auth.ts for the token.
  *
- * Deliberately no write tools: nothing here changes data.
+ * Read-only unless JOBMANAGER_MCP_WRITE=1, which adds the edit tools in
+ * mcp-write.ts. There are no delete tools.
  */
 
 const SUPPORTED_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
@@ -47,7 +49,7 @@ const TOOLS = [
     name: "get_application",
     title: "Get a job application",
     description:
-      "Full details of one tracked application by id (from list_applications): company, title, posting URL, notes, current status, the posting (location and description), status history newest first (OA scores and dates, interview rounds and dates, notes), and the names of the resume and cover letter used.",
+      "Full details of one tracked application by id (from list_applications): company, title, posting URL, notes, current status, the posting (location and description), status history newest first (each with its id, OA scores and dates, interview rounds and dates, notes), and the resume and cover letter used.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "integer", description: "Application id from list_applications." } },
@@ -56,7 +58,28 @@ const TOOLS = [
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
+  {
+    name: "list_documents",
+    title: "List resumes and cover letters",
+    description:
+      "Lists uploaded or generated resumes and cover letters, newest first, with id, name, version and how many applications use each. Search by name with `query`. Archived documents are left out unless include_archived is true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["resume", "cover_letter"], description: "Omit for both." },
+        query: { type: "string", description: "Words that must all appear in the document name. Case-insensitive." },
+        include_archived: { type: "boolean", default: false },
+        limit: { type: "integer", minimum: 1, maximum: MAX_LIMIT, default: DEFAULT_LIMIT },
+      },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
 ];
+
+function tools() {
+  return mcpWriteEnabled() ? [...TOOLS, ...WRITE_TOOLS] : TOOLS;
+}
 
 export interface ApplicationSummary {
   id: number;
@@ -101,7 +124,10 @@ export function getApplication(id: number) {
   if (!job) return null;
   const events = listEvents(id);
   const posting = getPosting(id);
-  const docName = (docId: number | null) => (docId ? getDocument(docId)?.name ?? null : null);
+  const docRef = (docId: number | null) => {
+    const doc = docId ? getDocument(docId) : null;
+    return doc ? { id: doc.id, name: doc.name, version: doc.version } : null;
+  };
   return {
     id: job.id,
     company: job.company,
@@ -110,8 +136,8 @@ export function getApplication(id: number) {
     notes: job.notes,
     added_at: job.created_at,
     status: statusLabel(events[0] ?? null, pendingAfter(events[0] ?? null)),
-    resume: docName(job.resume_id),
-    cover_letter: docName(job.cover_letter_id),
+    resume: docRef(job.resume_id),
+    cover_letter: docRef(job.cover_letter_id),
     posting: posting && {
       title: posting.title,
       company: posting.company,
@@ -127,6 +153,47 @@ export function getApplication(id: number) {
   };
 }
 
+export function searchDocuments(filter: { kind?: DocumentKind; query?: string; includeArchived?: boolean } = {}) {
+  const words = (filter.query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  const kinds: DocumentKind[] = filter.kind ? [filter.kind] : ["resume", "cover_letter"];
+  return kinds
+    .flatMap((k) => listDocuments(k))
+    .filter((d) => filter.includeArchived || !d.archived)
+    .filter((d) => words.every((w) => d.name.toLowerCase().includes(w)))
+    .sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at) || b.id - a.id)
+    .map((d) => ({
+      id: d.id,
+      kind: d.kind,
+      name: d.name,
+      version: d.version,
+      archived: !!d.archived,
+      generated: !!d.generated,
+      uploaded_at: d.uploaded_at,
+      used_by: d.used_by.length,
+    }));
+}
+
+function limitArg(v: unknown): number {
+  const limit = v === undefined ? DEFAULT_LIMIT : Number(v);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
+    throw new ToolInputError(`limit must be an integer from 1 to ${MAX_LIMIT}.`);
+  }
+  return limit;
+}
+
+/** `{ total, count, truncated?, [key]: rows }` with rows capped at `limit`. */
+function capped(key: string, rows: unknown[], limit: number) {
+  const shown = rows.slice(0, limit);
+  return result({
+    total: rows.length,
+    count: shown.length,
+    ...(rows.length > limit && {
+      truncated: `Showing the newest ${limit} of ${rows.length}. Narrow the search, or raise limit (max ${MAX_LIMIT}).`,
+    }),
+    [key]: shown,
+  });
+}
+
 function result(data: Record<string, unknown>) {
   // Compact JSON: list results can run to hundreds of rows.
   return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data };
@@ -137,6 +204,15 @@ function toolError(text: string) {
 }
 
 function callTool(name: unknown, args: Record<string, unknown>) {
+  try {
+    return runTool(name, args);
+  } catch (err) {
+    if (err instanceof ToolInputError) return toolError(err.message);
+    throw err;
+  }
+}
+
+function runTool(name: unknown, args: Record<string, unknown>) {
   switch (name) {
     case "list_applications": {
       const status = args.status as Status | undefined;
@@ -144,20 +220,8 @@ function callTool(name: unknown, args: Record<string, unknown>) {
         return toolError(`Unknown status "${String(status)}". Use one of: ${STATUSES.join(", ")}, or omit it for all.`);
       }
       if (args.query !== undefined && typeof args.query !== "string") return toolError("query must be a string.");
-      const limit = args.limit === undefined ? DEFAULT_LIMIT : Number(args.limit);
-      if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
-        return toolError(`limit must be an integer from 1 to ${MAX_LIMIT}.`);
-      }
-      const matches = listApplications({ status, query: args.query as string | undefined });
-      const applications = matches.slice(0, limit);
-      return result({
-        total: matches.length,
-        count: applications.length,
-        ...(matches.length > limit && {
-          truncated: `Showing the newest ${limit} of ${matches.length}. Narrow with status/query, or raise limit (max ${MAX_LIMIT}).`,
-        }),
-        applications,
-      });
+      const limit = limitArg(args.limit);
+      return capped("applications", listApplications({ status, query: args.query as string | undefined }), limit);
     }
     case "get_application": {
       const id = Number(args.id);
@@ -165,9 +229,20 @@ function callTool(name: unknown, args: Record<string, unknown>) {
       const application = getApplication(id);
       return application ? result(application) : toolError(`No application with id ${id}.`);
     }
-    default:
-      throw new RpcError(-32602, `Unknown tool: ${String(name)}`);
+    case "list_documents": {
+      const kind = args.kind as DocumentKind | undefined;
+      if (kind !== undefined && kind !== "resume" && kind !== "cover_letter") return toolError('kind must be "resume" or "cover_letter".');
+      if (args.query !== undefined && typeof args.query !== "string") return toolError("query must be a string.");
+      const limit = limitArg(args.limit);
+      const docs = searchDocuments({ kind, query: args.query as string | undefined, includeArchived: args.include_archived === true });
+      return capped("documents", docs, limit);
+    }
   }
+  if (typeof name === "string" && WRITE_TOOLS.some((t) => t.name === name)) {
+    if (!mcpWriteEnabled()) return toolError("Editing is turned off on this server (JOBMANAGER_MCP_WRITE is not set).");
+    return result(getApplication(runWriteTool(name, args)!)!);
+  }
+  throw new RpcError(-32602, `Unknown tool: ${String(name)}`);
 }
 
 class RpcError extends Error {
@@ -184,13 +259,15 @@ function dispatch(req: RpcRequest): unknown {
         protocolVersion: typeof asked === "string" && SUPPORTED_VERSIONS.includes(asked) ? asked : SUPPORTED_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: "jobmanager", title: "JobManager", version: "1.0.0" },
-        instructions: "Read-only access to the user's job-application tracker. Use list_applications to see jobs by status.",
+        instructions: mcpWriteEnabled()
+          ? "The user's job-application tracker. Find applications with list_applications (search with query), read one with get_application, and edit with update_application, add_status_update and update_status_update. Confirm with the user before changing anything they didn't clearly ask for."
+          : "Read-only access to the user's job-application tracker. Find applications with list_applications (search with query) and read one with get_application.",
       };
     }
     case "ping":
       return {};
     case "tools/list":
-      return { tools: TOOLS };
+      return { tools: tools() };
     case "tools/call":
       return callTool(req.params?.name, (req.params?.arguments as Record<string, unknown>) ?? {});
     default:
