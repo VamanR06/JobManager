@@ -63,7 +63,9 @@ jobs.example.com {
 ## Adding jobs from your phone (share sheet)
 
 An iOS Shortcut can send whatever you share (a job link, or a caption or message with links in it)
-to `POST /api/import/inbox`. The links get imported and queued, the same as pasting them on the Import page.
+to `POST /api/import/inbox`. Each link is added to the applications list the same way the Add form does it:
+company, title and description come from the posting page when it can be read. Nothing is queued for
+automation; to generate a resume, use **automate** on the job.
 
 1. `npm run inbox:token` and put the printed `JOBMANAGER_INBOX_TOKEN=…` line in the server's `.env.local`,
    then restart the app.
@@ -74,7 +76,7 @@ to `POST /api/import/inbox`. The links get imported and queued, the same as past
      `text` = **Shortcut Input**.
    - **Get Dictionary Value** `message` from **Contents of URL**, then **Show Notification** with it.
 3. Share a posting from Safari, LinkedIn, Instagram, etc. and pick **Add to JobManager**. You'll see
-   "Added 1 job", "Already tracked: …" or "Skipped: …".
+   "Added: Acme — Backend Intern", "Already tracked: …" or "Skipped: …".
 
 - The token is the only check on that one route: it replaces the login, Host and same-origin checks
   there and opens nothing else. Anyone who has it can add jobs, so keep it private. Running
