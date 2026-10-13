@@ -17,6 +17,8 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "JobManager",
   description: "Personal job application tracker",
+  // Backs up the X-Robots-Tag header in case a reverse proxy strips it.
+  robots: { index: false, follow: false, nocache: true, googleBot: { index: false, follow: false } },
 };
 
 export default function RootLayout({

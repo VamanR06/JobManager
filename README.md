@@ -48,6 +48,10 @@ jobs.example.com {
 - Sessions are a signed, `httpOnly` cookie good for 30 days (`Secure` when served over HTTPS).
   Changing the password signs every session out. **Sign out** is in the nav bar.
 - Five wrong passwords from one IP locks that IP out for 15 minutes.
+- Nothing is indexed by search engines: every response (login page included) carries
+  `X-Robots-Tag: noindex, nofollow`, and pages also have a robots `noindex` meta tag. There's
+  intentionally no `robots.txt` Disallow, because a crawler that's blocked from fetching a page
+  never sees its noindex.
 - While a hash is set, the localhost-only Host check is skipped (the login replaces it); the
   same-origin check on writes stays on.
 - The app needs a persistent disk for `data/` (SQLite + files), so use a VPS or a host with volumes
