@@ -120,8 +120,8 @@ export interface SafeResponse {
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
-async function readCapped(res: Response, maxBytes: number): Promise<string> {
-  if (!res.body) return "";
+async function readCapped(res: Response, maxBytes: number): Promise<Buffer> {
+  if (!res.body) return Buffer.alloc(0);
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -135,17 +135,22 @@ async function readCapped(res: Response, maxBytes: number): Promise<string> {
     }
     chunks.push(value);
   }
-  return Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks);
 }
+
+type SafeFetchOptions = { accept?: string; timeoutMs?: number; maxRedirects?: number; maxBytes?: number; resolve?: Resolver };
 
 /**
  * GET with manual redirects, validating every hop against the guard. Returns the
  * final body (capped) along with the redirect chain so both URLs can be stored.
  */
-export async function safeFetch(
-  url: string,
-  opts: { accept?: string; timeoutMs?: number; maxRedirects?: number; maxBytes?: number; resolve?: Resolver } = {}
-): Promise<SafeResponse> {
+export async function safeFetch(url: string, opts: SafeFetchOptions = {}): Promise<SafeResponse> {
+  const { bytes, ...rest } = await safeFetchBytes(url, opts);
+  return { ...rest, body: bytes.toString("utf8") };
+}
+
+/** safeFetch for binary content (e.g. a PDF): the body as raw bytes. */
+export async function safeFetchBytes(url: string, opts: SafeFetchOptions = {}): Promise<Omit<SafeResponse, "body"> & { bytes: Buffer }> {
   const chain: string[] = [];
   let current = url;
   const deadline = AbortSignal.timeout(opts.timeoutMs ?? 20_000);
@@ -172,7 +177,7 @@ export async function safeFetch(
       finalUrl: current,
       chain,
       contentType: res.headers.get("content-type") ?? "",
-      body: await readCapped(res, opts.maxBytes ?? MAX_BODY_BYTES),
+      bytes: await readCapped(res, opts.maxBytes ?? MAX_BODY_BYTES),
     };
   }
   throw new Error("Too many redirects");

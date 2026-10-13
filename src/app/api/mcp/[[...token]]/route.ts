@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }, { status: 400 });
   }
-  const reply = handleMcpMessage(body);
+  const reply = await handleMcpMessage(body);
   return reply ? NextResponse.json(reply) : new NextResponse(null, { status: 202 });
 }
 

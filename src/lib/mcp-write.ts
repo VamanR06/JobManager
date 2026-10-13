@@ -1,10 +1,14 @@
+import path from "path";
+import { DOCUMENT_EXTENSIONS, saveUploadedDocument } from "./documents";
+import { safeFetchBytes } from "./netguard";
 import { createEvent, getDocument, getEvent, getJob, updateEvent, updateJob } from "./queries";
 import { STATUSES, type DocumentKind, type Status } from "./types";
 
 /**
  * Write tools for the MCP server (mcp.ts). Off unless JOBMANAGER_MCP_WRITE=1,
  * because the MCP URL token is the only credential and these change data.
- * They edit applications and their status events; nothing deletes.
+ * They edit applications and their status events and upload resumes / cover
+ * letters; nothing deletes.
  */
 
 export function mcpWriteEnabled(): boolean {
@@ -108,7 +112,56 @@ export const WRITE_TOOLS = [
     },
     annotations: { ...WRITE, destructiveHint: true, idempotentHint: true },
   },
+  {
+    name: "upload_document",
+    title: "Upload a resume or cover letter",
+    description:
+      "Saves a file the user attached in the chat (PDF, Word, text or Markdown) as a resume or cover letter in their document library. A file with the same name as an existing one is stored as its next version; an identical re-upload is reused. Pass application_id to also link it to that application. Returns the saved document (and the updated application when linked).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: {
+          type: "object",
+          description: "The attached file.",
+          properties: {
+            download_url: { type: "string" },
+            file_id: { type: "string" },
+            mime_type: { type: "string" },
+            file_name: { type: "string" },
+          },
+          required: ["download_url", "file_id"],
+        },
+        kind: { type: "string", enum: ["resume", "cover_letter"], default: "resume" },
+        name: {
+          type: "string",
+          description: 'Name to save it under, e.g. "Resume - Stripe.pdf". Defaults to the attached file\'s name. Reusing an existing name makes a new version of it.',
+        },
+        application_id: { type: "integer", description: "Also link it to this application as its resume / cover letter." },
+      },
+      required: ["file"],
+      additionalProperties: false,
+    },
+    annotations: { ...WRITE, destructiveHint: false, idempotentHint: true },
+    // ChatGPT Apps SDK: this argument is a file from the conversation, sent as { download_url, file_id, … }.
+    _meta: { "openai/fileParams": ["file"] },
+  },
 ];
+
+/** Downloads an attached file's bytes; swappable in tests. */
+export type FileDownloader = (url: string) => Promise<{ ok: boolean; status: number; bytes: Buffer }>;
+
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+export const defaultDownloader: FileDownloader = (url) =>
+  safeFetchBytes(url, { accept: "*/*", timeoutMs: 30_000, maxBytes: MAX_UPLOAD_BYTES });
+
+const MIME_EXTENSIONS: Record<string, string> = {
+  "application/pdf": ".pdf",
+  "application/msword": ".doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+  "text/plain": ".txt",
+  "text/markdown": ".md",
+};
 
 function rejectUnknown(args: Record<string, unknown>, allowed: string[]) {
   const extra = Object.keys(args).filter((k) => !allowed.includes(k));
@@ -229,15 +282,75 @@ function updateStatusUpdate(args: Record<string, unknown>): number {
   return event.job_id;
 }
 
-/** Runs a write tool; returns the id of the application it changed, or null for an unknown tool name. */
-export function runWriteTool(name: string, args: Record<string, unknown>): number | null {
+function text(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+/** A supported extension from the name, else from the attachment's name, else from its MIME type. */
+function documentName(given: string | null, file: Record<string, unknown>, kind: DocumentKind): { name: string; ext: string } {
+  const base = given ?? text(file.file_name) ?? (kind === "resume" ? "Resume" : "Cover letter");
+  const extOf = (n: string | null) => (n ? path.extname(n).toLowerCase() : "");
+  const own = extOf(base);
+  if (DOCUMENT_EXTENSIONS.includes(own)) return { name: base, ext: own };
+  const fromFile = extOf(text(file.file_name));
+  const fromMime = MIME_EXTENSIONS[(text(file.mime_type) ?? "").split(";")[0].toLowerCase()] ?? "";
+  const ext = DOCUMENT_EXTENSIONS.includes(fromFile) ? fromFile : fromMime;
+  if (!ext) throw new ToolInputError(`Only ${DOCUMENT_EXTENSIONS.join(", ")} files can be saved as documents.`);
+  return { name: `${base}${ext}`, ext };
+}
+
+async function uploadDocument(args: Record<string, unknown>, download: FileDownloader): Promise<WriteResult> {
+  rejectUnknown(args, ["file", "kind", "name", "application_id"]);
+  const file = args.file as Record<string, unknown> | undefined;
+  const url = file && typeof file === "object" ? text(file.download_url) : null;
+  if (!file || !url) throw new ToolInputError("file must be a file attached in the chat (with a download_url).");
+  if (!/^https:\/\//i.test(url)) throw new ToolInputError("The file's download_url must be https.");
+  const kind = (args.kind ?? "resume") as DocumentKind;
+  if (kind !== "resume" && kind !== "cover_letter") throw new ToolInputError('kind must be "resume" or "cover_letter".');
+  if (args.name !== undefined && !text(args.name)) throw new ToolInputError("name can't be blank.");
+  const job = args.application_id === undefined ? null : getJob(intArg(args.application_id, "application_id"));
+  if (args.application_id !== undefined && !job) throw new ToolInputError(`No application with id ${String(args.application_id)}.`);
+  const { name, ext } = documentName(text(args.name), file, kind);
+
+  let res: Awaited<ReturnType<FileDownloader>>;
+  try {
+    res = await download(url);
+  } catch (err) {
+    const why = err instanceof Error && err.message === "Response too large" ? `it's over ${MAX_UPLOAD_BYTES / 1024 / 1024} MB` : err instanceof Error ? err.message : String(err);
+    throw new ToolInputError(`Couldn't download the file: ${why}.`);
+  }
+  if (!res.ok) throw new ToolInputError(`Couldn't download the file: HTTP ${res.status}. The link may have expired; attach it again.`);
+  if (!res.bytes.length) throw new ToolInputError("The downloaded file is empty.");
+  const head = res.bytes.subarray(0, 4).toString("latin1");
+  if (ext === ".pdf" && head !== "%PDF") throw new ToolInputError("That file isn't a valid PDF.");
+  if (ext === ".docx" && !head.startsWith("PK")) throw new ToolInputError("That file isn't a valid .docx.");
+
+  const { doc, duplicate } = saveUploadedDocument(kind, name, res.bytes);
+  if (job) updateJob(job.id, kind === "resume" ? { resume_id: doc.id } : { cover_letter_id: doc.id });
+  return {
+    applicationId: job?.id ?? null,
+    document: { id: doc.id, kind: doc.kind, name: doc.name, version: doc.version, duplicate },
+  };
+}
+
+export interface WriteResult {
+  /** The application that changed (or was linked), to return its updated state. */
+  applicationId: number | null;
+  /** Set by upload_document. */
+  document?: { id: number; kind: DocumentKind; name: string; version: number; duplicate: boolean };
+}
+
+/** Runs a write tool, or returns null for an unknown tool name. */
+export async function runWriteTool(name: string, args: Record<string, unknown>, download = defaultDownloader): Promise<WriteResult | null> {
   switch (name) {
     case "update_application":
-      return updateApplication(args);
+      return { applicationId: updateApplication(args) };
     case "add_status_update":
-      return addStatusUpdate(args);
+      return { applicationId: addStatusUpdate(args) };
     case "update_status_update":
-      return updateStatusUpdate(args);
+      return { applicationId: updateStatusUpdate(args) };
+    case "upload_document":
+      return uploadDocument(args, download);
     default:
       return null;
   }

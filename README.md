@@ -109,6 +109,11 @@ Set `JOBMANAGER_MCP_WRITE=1` to also allow edits. Nothing can be deleted this wa
 - `add_status_update` adds a status (OA, interview, rejected…) with its fields: dates, score, round,
   links, before/after notes. The newest one becomes the current status.
 - `update_status_update` edits any field of an existing status event; `null` clears one.
+- `upload_document` saves a file you attach in the chat (PDF, Word, text or Markdown, up to 10 MB) as a
+  resume or cover letter, the same way the Documents page does: same name → next version, identical
+  file → reused. Give it an `application_id` to link it to that application too. ChatGPT passes the
+  attachment as a temporary download link (the tool declares `openai/fileParams`); if one has expired,
+  attach the file again.
 
 Dates must be ISO 8601 with a timezone (e.g. `2026-10-14T15:00:00-04:00`) and are stored in UTC.
 
