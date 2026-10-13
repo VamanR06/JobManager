@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { INBOX_PATH, inboxAuthorized, passwordHash, SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { INBOX_PATH, inboxAuthorized, isMcpPath, mcpAuthorized, passwordHash, SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 
 /**
  * Request guard for the whole app.
@@ -17,7 +17,8 @@ import { INBOX_PATH, inboxAuthorized, passwordHash, SESSION_COOKIE, verifySessio
  *
  * The one exception is the share-sheet inbox (INBOX_PATH): it's called by an iOS
  * Shortcut, not a browser, so a bearer token (JOBMANAGER_INBOX_TOKEN) replaces
- * all three checks there, and it's refused without one.
+ * all three checks there, and it's refused without one. The read-only MCP
+ * endpoint (/api/mcp/<token>, for ChatGPT) works the same way with its own token.
  */
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -83,6 +84,12 @@ function guard(req: NextRequest): NextResponse {
     return inboxAuthorized(req.headers.get("authorization"))
       ? NextResponse.next()
       : NextResponse.json({ error: "Bad inbox token" }, { status: 401 });
+  }
+
+  if (isMcpPath(pathname)) {
+    return mcpAuthorized(pathname, req.headers.get("authorization"))
+      ? NextResponse.next()
+      : NextResponse.json({ error: "Bad MCP token" }, { status: 401 });
   }
 
   if (!hash && !hostAllowed(req.headers.get("host"))) {

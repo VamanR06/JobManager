@@ -104,13 +104,50 @@ export function inboxToken(): string | null {
 export function inboxAuthorized(header: string | null, token = inboxToken()): boolean {
   if (!token || !header) return false;
   const m = /^Bearer\s+(.+)$/i.exec(header.trim());
-  if (!m) return false;
-  // Hash both sides so the compare is fixed-length whatever was sent.
-  const given = crypto.createHash("sha256").update(m[1].trim()).digest();
-  const expected = crypto.createHash("sha256").update(token).digest();
-  return crypto.timingSafeEqual(given, expected);
+  return !!m && sameToken(m[1].trim(), token);
+}
+
+/** Constant-time compare; both sides are hashed so it's fixed-length whatever was sent. */
+function sameToken(given: string, token: string): boolean {
+  const a = crypto.createHash("sha256").update(given).digest();
+  const b = crypto.createHash("sha256").update(token).digest();
+  return crypto.timingSafeEqual(a, b);
 }
 
 export function generateInboxToken(): string {
   return crypto.randomBytes(32).toString("base64url");
+}
+
+// ---------- MCP endpoint (read-only; ChatGPT scheduled tasks etc.) ----------
+
+/**
+ * Token for the MCP endpoint, set with JOBMANAGER_MCP_TOKEN (`npm run mcp:token`).
+ * ChatGPT custom connectors can't send a static Authorization header (only OAuth
+ * or no auth), so the token rides in the URL path: /api/mcp/<token>. Clients that
+ * can send headers may use POST /api/mcp with `Authorization: Bearer <token>`.
+ * Like the inbox token, it stands in for the session, Host and same-origin checks,
+ * and only on these paths.
+ */
+export const MCP_PATH = "/api/mcp";
+
+export function mcpToken(): string | null {
+  return process.env.JOBMANAGER_MCP_TOKEN?.trim() || null;
+}
+
+export function isMcpPath(pathname: string): boolean {
+  return pathname === MCP_PATH || pathname.startsWith(`${MCP_PATH}/`);
+}
+
+export function mcpAuthorized(pathname: string, header: string | null, token = mcpToken()): boolean {
+  if (!token) return false;
+  if (pathname === MCP_PATH) return inboxAuthorized(header, token);
+  const m = /^\/api\/mcp\/([^/]+)\/?$/.exec(pathname);
+  if (!m) return false;
+  let given: string;
+  try {
+    given = decodeURIComponent(m[1]);
+  } catch {
+    return false;
+  }
+  return sameToken(given, token);
 }

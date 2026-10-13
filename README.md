@@ -88,6 +88,30 @@ automation; to generate a resume, use **automate** on the job.
   `curl -X POST https://<host>/api/import/inbox -H "Authorization: Bearer <token>" -d 'https://…'`
   tests it without the phone.
 
+## Reading the list from ChatGPT (MCP)
+
+A small read-only [MCP](https://modelcontextprotocol.io) server lives at `/api/mcp/<token>`. Its one
+tool, `list_applications`, returns jobs by current status (default **To apply**) with company, title,
+posting link, location and dates. It can't change anything. A ChatGPT scheduled task can use it to
+send you the to-apply list each morning. Custom GPT Actions can't run in scheduled tasks, but connected
+apps (including custom MCP connectors) can.
+
+1. `npm run mcp:token` and put the printed `JOBMANAGER_MCP_TOKEN=…` line in the server's `.env.local`,
+   then restart the app.
+2. In ChatGPT: **Settings → Apps → Advanced settings → Developer mode** on, then **Create app**
+   with MCP server URL `https://<your host>/api/mcp/<token>` and authentication **No authentication**.
+3. Start a chat with the app enabled and check it, e.g. "List my to-apply jobs."
+4. Schedule it: "Every weekday at 8am, use JobManager to list my to-apply applications as a
+   checklist with links, oldest first."
+
+- ChatGPT custom connectors can only use OAuth or no auth (they can't send a fixed header), so the
+  token goes in the URL instead. The token is the only check on `/api/mcp/…`, and it opens nothing else.
+  Running `npm run mcp:token` again and swapping the value revokes the old URL. Clients that can send
+  headers can instead POST to `/api/mcp` with `Authorization: Bearer <token>`.
+- ChatGPT calls from OpenAI's servers, so this needs the deployed app over HTTPS.
+  `curl -X POST https://<host>/api/mcp/<token> -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_applications","arguments":{}}}'`
+  tests it.
+
 ## Features
 
 ### Applications
