@@ -48,6 +48,10 @@ jobs.example.com {
 - Sessions are a signed, `httpOnly` cookie good for 30 days (`Secure` when served over HTTPS).
   Changing the password signs every session out. **Sign out** is in the nav bar.
 - Five wrong passwords from one IP locks that IP out for 15 minutes.
+- Nothing is indexed by search engines: every response (login page included) carries
+  `X-Robots-Tag: noindex, nofollow`, and pages also have a robots `noindex` meta tag. There's
+  intentionally no `robots.txt` Disallow, because a crawler that's blocked from fetching a page
+  never sees its noindex.
 - While a hash is set, the localhost-only Host check is skipped (the login replaces it); the
   same-origin check on writes stays on.
 - The app needs a persistent disk for `data/` (SQLite + files), so use a VPS or a host with volumes
@@ -55,6 +59,31 @@ jobs.example.com {
 - The tracker, documents and URL search work anywhere. The parts that drive local tools — interview
   recording (macOS only) and the Codex/Claude worker — need those tools
   installed and logged in on the same machine.
+
+## Adding jobs from your phone (share sheet)
+
+An iOS Shortcut can send whatever you share (a job link, or a caption or message with links in it)
+to `POST /api/import/inbox`. The links get imported and queued, the same as pasting them on the Import page.
+
+1. `npm run inbox:token` and put the printed `JOBMANAGER_INBOX_TOKEN=…` line in the server's `.env.local`,
+   then restart the app.
+2. On the iPhone, in Shortcuts, make a new shortcut named e.g. **Add to JobManager**:
+   - Turn on **Show in Share Sheet** (in the shortcut's settings), accepting **URLs** and **Text**.
+   - **Get Contents of URL**: `https://<your host>/api/import/inbox`, Method **POST**,
+     Header `Authorization` = `Bearer <token>`, Request Body **JSON** with one Text field
+     `text` = **Shortcut Input**.
+   - **Get Dictionary Value** `message` from **Contents of URL**, then **Show Notification** with it.
+3. Share a posting from Safari, LinkedIn, Instagram, etc. and pick **Add to JobManager**. You'll see
+   "Added 1 job", "Already tracked: …" or "Skipped: …".
+
+- The token is the only check on that one route: it replaces the login, Host and same-origin checks
+  there and opens nothing else. Anyone who has it can add jobs, so keep it private. Running
+  `npm run inbox:token` again and swapping the value revokes the old one.
+- Instagram, Threads, Facebook, TikTok and X post links are skipped, because those pages need a login to
+  read. Share the job link from the post (caption or bio) instead.
+- Your phone has to reach the server, so in practice this means the deployed app over HTTPS.
+  `curl -X POST https://<host>/api/import/inbox -H "Authorization: Bearer <token>" -d 'https://…'`
+  tests it without the phone.
 
 ## Features
 
