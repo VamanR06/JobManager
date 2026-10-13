@@ -69,6 +69,25 @@ test("list_applications returns everything without a filter, or only the given c
   assert.equal(call("list_applications", { status: "bogus" }).isError, true);
 });
 
+test("list_applications searches company, title and URL, every word must match", () => {
+  assert.deepEqual(idsOf(call("list_applications", { query: "mcp" })), [todo.id]);
+  assert.deepEqual(idsOf(call("list_applications", { query: "  MCP   intern " })), [todo.id], "case and spacing don't matter");
+  assert.deepEqual(idsOf(call("list_applications", { query: "jobs.example.com/1" })), [todo.id], "matches the URL");
+  assert.deepEqual(idsOf(call("list_applications", { query: "mcp senior" })), [], "all words must match");
+  assert.deepEqual(idsOf(call("list_applications", { query: "co", status: "to_apply" })), [todo.id], "combines with status");
+  assert.equal(call("list_applications", { query: 5 }).isError, true);
+});
+
+test("list_applications caps rows and says when it did", () => {
+  const one = call("list_applications", { limit: 1 }).structuredContent;
+  assert.equal(one.count, 1);
+  assert.equal(one.total, 2);
+  assert.match(one.truncated, /newest 1 of 2/);
+  assert.equal(call("list_applications", {}).structuredContent.truncated, undefined);
+  assert.equal(call("list_applications", { limit: 0 }).isError, true);
+  assert.equal(call("list_applications", { limit: 501 }).isError, true);
+});
+
 test("get_application returns one application with its history", () => {
   const app = call("get_application", { id: done.id }).structuredContent;
   assert.equal(app.company, "Done Co");
