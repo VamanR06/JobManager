@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { passwordHash, SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { INBOX_PATH, inboxAuthorized, passwordHash, SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 
 /**
  * Request guard for the whole app.
@@ -14,6 +14,10 @@ import { passwordHash, SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
  *
  * Either way, state-changing requests must come from this same origin (blocks
  * other websites open in the browser from POSTing here).
+ *
+ * The one exception is the share-sheet inbox (INBOX_PATH): it's called by an iOS
+ * Shortcut, not a browser, so a bearer token (JOBMANAGER_INBOX_TOKEN) replaces
+ * all three checks there, and it's refused without one.
  */
 
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -60,6 +64,12 @@ function crossSiteWrite(req: NextRequest): NextResponse | null {
 export function proxy(req: NextRequest) {
   const hash = passwordHash();
   const { pathname, search } = req.nextUrl;
+
+  if (pathname === INBOX_PATH) {
+    return inboxAuthorized(req.headers.get("authorization"))
+      ? NextResponse.next()
+      : NextResponse.json({ error: "Bad inbox token" }, { status: 401 });
+  }
 
   if (!hash && !hostAllowed(req.headers.get("host"))) {
     return NextResponse.json({ error: "Host not allowed" }, { status: 403 });

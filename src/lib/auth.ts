@@ -85,3 +85,32 @@ export function safeNextPath(next: string | null | undefined): string {
   if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return "/";
   return next;
 }
+
+// ---------- share-sheet inbox ----------
+
+/**
+ * Token for /api/import/inbox, which an iOS Shortcut posts shared links to.
+ * Turned on by setting JOBMANAGER_INBOX_TOKEN (make one with `npm run inbox:token`).
+ * The Shortcut sends it as `Authorization: Bearer <token>`. It stands in for the
+ * session cookie, Host and same-origin checks, so it's only accepted on that route.
+ */
+export const INBOX_PATH = "/api/import/inbox";
+
+export function inboxToken(): string | null {
+  return process.env.JOBMANAGER_INBOX_TOKEN?.trim() || null;
+}
+
+/** Constant-time check of an Authorization header against the configured token. */
+export function inboxAuthorized(header: string | null, token = inboxToken()): boolean {
+  if (!token || !header) return false;
+  const m = /^Bearer\s+(.+)$/i.exec(header.trim());
+  if (!m) return false;
+  // Hash both sides so the compare is fixed-length whatever was sent.
+  const given = crypto.createHash("sha256").update(m[1].trim()).digest();
+  const expected = crypto.createHash("sha256").update(token).digest();
+  return crypto.timingSafeEqual(given, expected);
+}
+
+export function generateInboxToken(): string {
+  return crypto.randomBytes(32).toString("base64url");
+}

@@ -12,6 +12,7 @@
     "codex:doctor": "tsx --env-file-if-exists=.env.local scripts/automation-cli.ts doctor",
     "codex:smoke": "tsx --env-file-if-exists=.env.local scripts/automation-cli.ts smoke",
     "auth:hash": "tsx scripts/hash-password.ts",
+    "inbox:token": "tsx scripts/inbox-token.ts",
     "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
