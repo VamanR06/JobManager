@@ -227,6 +227,10 @@ The **Profile** page holds the facts application forms ask for (name, contact, l
 authorization, demographic-question policy…), exactly as you type them. `browser_autofill` answers from it and
 from answers saved earlier; it never infers a fact you haven't entered.
 
+Below it, **Saved answers** lists the answers to form questions it reuses, grouped by where they apply (all
+applications, one company, one application). Edit or delete any of them, or add one for all applications; write
+`{company}` where the employer's name goes ("How did you hear about {company}?").
+
 The resume-generation queue (Codex/Claude worker, LaTeX review) was removed in favour of ChatGPT. Every resume it
 generated is on the Resumes page, the unapproved versions as archived documents; their LaTeX sources stay in
 `data/artifacts/`.

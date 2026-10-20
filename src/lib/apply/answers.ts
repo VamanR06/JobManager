@@ -198,6 +198,65 @@ export function saveAnswer(input: {
     );
 }
 
+// ---------- editing (Profile page) ----------
+
+export interface AnswerRow {
+  id: number;
+  question_text: string;
+  answer: string;
+  scope: AnswerScope;
+  /** Normalised company name, for company-scoped answers. */
+  company_key: string | null;
+  job_id: number | null;
+  /** "Company — Title", for job-scoped answers. */
+  job_label: string | null;
+  /** Saved for a question with a fixed list of options (the answer must match one). */
+  has_options: boolean;
+  updated_at: string;
+}
+
+export function listAnswers(): AnswerRow[] {
+  return (getDb()
+    .prepare(
+      `SELECT a.id, a.question_text, a.answer, a.scope, a.company_key, a.job_id, a.options_sig, a.updated_at,
+              CASE WHEN j.id IS NULL THEN NULL ELSE j.company || ' — ' || j.title END AS job_label
+         FROM answers a LEFT JOIN jobs j ON j.id = a.job_id
+        ORDER BY CASE a.scope WHEN 'global' THEN 0 WHEN 'company' THEN 1 ELSE 2 END, a.company_key, lower(a.question_text)`
+    )
+    .all() as (Omit<AnswerRow, "has_options"> & { options_sig: string })[])
+    .map(({ options_sig, ...r }) => ({ ...r, has_options: options_sig !== "" }));
+}
+
+/** Changes a saved answer's text. False if there's no such answer. */
+export function updateAnswerText(id: number, answer: string): boolean {
+  return getDb()
+    .prepare("UPDATE answers SET answer = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?")
+    .run(answer, id).changes > 0;
+}
+
+export function deleteAnswer(id: number): boolean {
+  return getDb().prepare("DELETE FROM answers WHERE id = ?").run(id).changes > 0;
+}
+
+/**
+ * Adds an answer for every application. Write "{company}" where the company's
+ * name goes ("Why {company}?"); it works for any list of options, as long as the
+ * answer matches one of them.
+ */
+export function addGlobalAnswer(question: string, answer: string): void {
+  // Same key questionKey() makes from a real form ("Why Acme?" at Acme → "why {company}").
+  const key = question.split(/\{company\}/i).map(norm).join(" {company} ").replace(/\s+/g, " ").trim();
+  getDb()
+    .prepare(
+      `INSERT INTO answers (question_norm, question_text, options_sig, answer, scope)
+       VALUES (?, ?, '', ?, 'global')
+       ON CONFLICT(question_norm, options_sig, scope, COALESCE(company_key, ''), COALESCE(job_id, 0))
+       DO UPDATE SET answer = excluded.answer, question_text = excluded.question_text,
+         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`
+    )
+    .run(key, question.trim(), answer);
+}
+
 // ---------- resolution ----------
 
 function yesNo(v: string | undefined): "Yes" | "No" | null {
