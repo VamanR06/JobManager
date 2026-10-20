@@ -3,9 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { generateInboxToken, hashPassword, INBOX_PATH, inboxAuthorized } from "../src/lib/auth";
-import { importUrls, UNKNOWN_TITLE } from "../src/lib/automation";
 import { getDb } from "../src/lib/db";
-import { importSharedText, linksInText } from "../src/lib/inbox";
+import { importSharedText, linksInText, UNKNOWN_TITLE } from "../src/lib/inbox";
 import type { ParsedPosting } from "../src/lib/parser";
 import { getJob, getPosting, listJobs } from "../src/lib/queries";
 import { proxy } from "../src/proxy";
@@ -57,7 +56,6 @@ test("shared links go on the applications list without queueing automation", asy
 
   const again = await importSharedText("https://boards.greenhouse.io/inboxco/jobs/77", parse);
   assert.equal(again.results[0].outcome, "duplicate");
-  assert.equal(importUrls(["https://boards.greenhouse.io/inboxco/jobs/77"])[0].outcome, "duplicate", "Import page sees it too");
 });
 
 test("an unreadable page still adds the job with placeholders", async () => {

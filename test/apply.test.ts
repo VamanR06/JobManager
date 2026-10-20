@@ -12,7 +12,7 @@ import { categorize, matchOption, questionKey, resolveField, saveAnswer } from "
 import { BrowserOwner } from "../src/lib/apply/browser";
 import { prepareApplication, type FieldReport } from "../src/lib/apply/fill";
 import { CONFIRM_SCRIPT, type ConfirmationCheck } from "../src/lib/apply/confirm";
-import { markSubmitted } from "../src/lib/automation";
+import { markSubmitted } from "../src/lib/submission";
 import { listEvents } from "../src/lib/queries";
 import type { ScannedField } from "../src/lib/apply/scan";
 

@@ -2,10 +2,9 @@ import fs from "fs";
 import path from "path";
 import type { Page } from "playwright";
 import { ARTIFACTS_DIR, DATA_DIR, getDb, WORK_DIR } from "../db";
-import { approvedArtifact, getProfileMap, markSubmitted } from "../automation";
 import { getDocument, getJob } from "../queries";
-import { logEvent } from "../queue";
-import { artifactDownloadName } from "../steps";
+import { getProfileMap } from "../profile";
+import { logEvent, markSubmitted } from "../submission";
 import { matchOption } from "./answers";
 import { BrowserOwner, hostAllowed, PROFILE_DIR } from "./browser";
 import { CONFIRM_SCRIPT, type ConfirmationCheck } from "./confirm";
@@ -19,10 +18,9 @@ import { accountPassword, createAccount, findAccount } from "./vault";
  * ChatGPT is the agent: it reads a snapshot, then asks for one action at a
  * time (click, type, choose, upload…), and gets a fresh snapshot back.
  *
- * It runs inside the web server, so it works on a headless server with no
- * worker. It has its own browser profile (separate from the worker's, which
- * may run on the same machine) and the worker's navigation guard: each job's
- * tab may only go to that job's own sites and known ATS domains.
+ * It runs inside the web server, so it works on a headless server. It has its
+ * own browser profile and a navigation guard: each job's tab may only go to
+ * that job's own sites and known ATS domains.
  *
  * Rules it enforces, whatever the model asks:
  *  - Passwords are generated and stored in the vault and typed straight into
@@ -328,17 +326,10 @@ export class Harness {
       src = path.join(DATA_DIR, doc.file_path);
       name = path.extname(doc.name) ? doc.name : `${doc.name}${path.extname(doc.file_path)}`;
     } else if ((opts.kind ?? "resume") === "resume") {
-      const approved = approvedArtifact(jobId);
-      const doc = !approved && job.resume_id ? getDocument(job.resume_id) : null;
-      if (approved) {
-        src = path.join(DATA_DIR, approved.pdf_path);
-        name = `${artifactDownloadName(job.company)}.pdf`;
-      } else if (doc) {
-        src = path.join(DATA_DIR, doc.file_path);
-        name = path.extname(doc.name) ? doc.name : `${doc.name}${path.extname(doc.file_path)}`;
-      } else {
-        throw new HarnessError("This application has no resume: approve a generated one, link one (update_application resume_id), or pass document_id.");
-      }
+      const doc = job.resume_id ? getDocument(job.resume_id) : null;
+      if (!doc) throw new HarnessError("This application has no resume linked: link one (update_application resume_id, or upload_document with application_id), or pass document_id.");
+      src = path.join(DATA_DIR, doc.file_path);
+      name = path.extname(doc.name) ? doc.name : `${doc.name}${path.extname(doc.file_path)}`;
     } else {
       const doc = job.cover_letter_id ? getDocument(job.cover_letter_id) : null;
       if (!doc) throw new HarnessError("This application has no cover letter linked; pass document_id.");
@@ -376,7 +367,7 @@ export class Harness {
     });
   }
 
-  /** Fills everything the Profile and answer bank answer (the same rules as the worker's prepare step). */
+  /** Fills everything the Profile and answer bank answer (apply/answers.ts rules). */
   autofill(jobId: number): Promise<ActionResult> {
     return this.locked(jobId, async () => {
       const page = this.page(jobId);
@@ -466,7 +457,7 @@ export class Harness {
       const before = db.prepare("SELECT workflow_state FROM jobs WHERE id = ?").get(jobId) as { workflow_state: string | null };
       if (before.workflow_state === "submitted") throw new HarnessError("This application is already recorded as submitted.");
       if (before.workflow_state === "submitting" || before.workflow_state === "submission_unknown") {
-        throw new HarnessError("A submission for this application may already have gone through. Don't submit again: ask the user to check the portal or their email, then mark it on the queue.");
+        throw new HarnessError("A submission for this application may already have gone through. Don't submit again: ask the user to check the portal or their email, then mark it on the job page.");
       }
       const snap = await takeSnapshot(page);
       if (snap.blockers.length) throw new HarnessError(`Can't submit: ${snap.blockers.join("; ")}. The user has to deal with that.`);
@@ -529,7 +520,7 @@ export class Harness {
       restore("submission_unknown", "Clicked submit through ChatGPT but the site showed no confirmation. Check the portal or your email before doing anything else.");
       return {
         snapshot: after, submitted: false, state: "submission_unknown",
-        note: "The site showed no confirmation, so it's unknown whether this went through. Don't submit again: ask the user to check the portal or their email, then mark it on the queue.",
+        note: "The site showed no confirmation, so it's unknown whether this went through. Don't submit again: ask the user to check the portal or their email, then mark it on the job page.",
       };
     });
   }
