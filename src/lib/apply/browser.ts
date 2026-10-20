@@ -5,9 +5,9 @@ import { WORK_DIR } from "../db";
 import { assertPublicUrl } from "../netguard";
 
 /**
- * The worker's single browser: a dedicated, visible Chromium profile under
- * ~/.jobmanager/browser-profile — never the person's own Chrome profile, and
- * no cookies are imported. Logins made here persist in that profile only.
+ * The browser for applying (apply/harness.ts): a dedicated Chromium profile
+ * under ~/.jobmanager/ — never the person's own Chrome profile, and no cookies
+ * are imported. Logins made here persist in that profile only.
  *
  * Each job's tab may only navigate (top-level) to that job's application
  * hosts; anything else — including links in a posting — is blocked, so
@@ -103,7 +103,7 @@ export class BrowserOwner {
         }
         return await route.continue();
       } catch {
-        // Never let a routing hiccup take the worker down; refuse just this request.
+        // Never let a routing hiccup take the server down; refuse just this request.
         await route.abort("blockedbyclient").catch(() => {});
       }
     });

@@ -1,4 +1,4 @@
-import { listProfile } from "@/lib/automation";
+import { listProfile } from "@/lib/profile";
 import ProfileEditor from "@/components/ProfileEditor";
 
 export const dynamic = "force-dynamic";

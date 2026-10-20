@@ -4,8 +4,8 @@ import { importSharedText } from "@/lib/inbox";
 
 /**
  * Share-sheet inbox: takes whatever an iOS Shortcut shares (a URL, or a caption
- * with links in it), adds the links to the applications list — no automation
- * is queued — and returns a one-line summary.
+ * with links in it), adds the links to the applications list and returns a
+ * one-line summary.
  * Body: JSON `{ "text": "..." }`, or the raw text itself.
  */
 export async function POST(req: NextRequest) {

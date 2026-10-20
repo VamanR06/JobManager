@@ -91,7 +91,7 @@ export const BROWSER_TOOLS = [
   {
     name: "browser_upload",
     title: "Attach a resume or cover letter",
-    description: `Attaches a file to a file field or "Upload" button. By default the application's resume (the approved generated one, else the linked one); kind "cover_letter" for its cover letter; or any document_id from list_documents. ${SNAPSHOT_NOTE}`,
+    description: `Attaches a file to a file field or "Upload" button. By default the resume linked to the application; kind "cover_letter" for its cover letter; or any document_id from list_documents. ${SNAPSHOT_NOTE}`,
     inputSchema: {
       type: "object",
       properties: {

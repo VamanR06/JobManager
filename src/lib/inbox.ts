@@ -1,13 +1,88 @@
-import { addUrlsManually, type ImportResult } from "./automation";
-import type { ParsedPosting } from "./parser";
-import { splitPastedUrls } from "./urls";
+import { getDb } from "./db";
+import { parsePostingUrl, type ParsedPosting } from "./parser";
+import { createEvent, createJob, upsertPosting } from "./queries";
+import type { Job } from "./types";
+import { analyzeUrl, splitPastedUrls } from "./urls";
 
 /**
  * Inbox for links shared from a phone (an iOS Shortcut in the share sheet).
- * Links are added to the applications list only, like the Add form; nothing is
- * queued for automation (start that from the job with "automate").
+ * Links are added to the applications list, like the Add form.
  * The token check lives in auth.ts so the proxy can use it without loading the DB.
  */
+
+function findByKey(key: string): Pick<Job, "id" | "company" | "title"> | null {
+  return (
+    (getDb().prepare("SELECT id, company, title FROM jobs WHERE posting_key = ? ORDER BY id LIMIT 1").get(key) as
+      | Pick<Job, "id" | "company" | "title">
+      | undefined) ?? null
+  );
+}
+
+function placeholderCompany(info: { tenant: string | null; normalized: string }): string {
+  if (info.tenant) return info.tenant.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return new URL(info.normalized).hostname.replace(/^www\./, "");
+}
+
+export interface ImportResult {
+  input: string;
+  outcome: "created" | "duplicate" | "invalid" | "unsupported";
+  job_id?: number;
+  message?: string;
+}
+
+/** Title for a hand-added job whose posting page couldn't be read. */
+export const UNKNOWN_TITLE = "(title unknown)";
+
+/**
+ * Adds links as hand-tracked applications, like the Add form: company, title and
+ * description come from the posting page when it can be read (workflow_state
+ * stays NULL).
+ * Each starts with a "to apply" status.
+ */
+export async function addUrlsManually(
+  inputs: string[],
+  parse: (url: string) => Promise<ParsedPosting> = parsePostingUrl
+): Promise<ImportResult[]> {
+  const db = getDb();
+  const out: ImportResult[] = [];
+  for (const input of inputs) {
+    const info = analyzeUrl(input);
+    if (!info.ok) {
+      out.push({ input, outcome: info.reason, message: info.message });
+      continue;
+    }
+    const dupe = findByKey(info.key);
+    if (dupe) {
+      out.push({ input, outcome: "duplicate", job_id: dupe.id, message: `${dupe.company} — ${dupe.title}` });
+      continue;
+    }
+    let parsed: ParsedPosting | null = null;
+    try {
+      parsed = await parse(info.normalized);
+    } catch {
+      // Still added; the job page offers editing the description by hand.
+    }
+    // Dedup is re-checked inside the insert transaction: the fetch above awaited.
+    out.push(db.transaction((): ImportResult => {
+      const existing = findByKey(info.key);
+      if (existing) return { input, outcome: "duplicate", job_id: existing.id, message: `${existing.company} — ${existing.title}` };
+      const company = parsed?.company?.trim() || placeholderCompany(info);
+      const title = parsed?.title?.trim() || UNKNOWN_TITLE;
+      const job = createJob({ company, title, url: info.normalized });
+      db.prepare("UPDATE jobs SET ats = ?, ats_tenant = ?, posting_id = ?, posting_key = ? WHERE id = ?").run(
+        info.ats, info.tenant, info.postingId, info.key, job.id
+      );
+      upsertPosting(
+        parsed
+          ? { job_id: job.id, ...parsed, source: "parsed", fetch_status: "ok" }
+          : { job_id: job.id, description_md: "", source: "parsed", fetch_status: "failed" }
+      );
+      createEvent({ job_id: job.id, status: "to_apply" });
+      return { input, outcome: "created", job_id: job.id, message: `${company} — ${title}` };
+    }).immediate());
+  }
+  return out;
+}
 
 /** Hosts whose share links are posts about a job, not the posting itself; their pages need a login to read. */
 const SOCIAL_HOSTS = ["instagram.com", "threads.net", "threads.com", "facebook.com", "tiktok.com", "x.com", "twitter.com"];

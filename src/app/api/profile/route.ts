@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listProfile, setProfileFacts } from "@/lib/automation";
+import { listProfile, setProfileFacts } from "@/lib/profile";
 import { PROFILE_FIELDS } from "@/lib/workflow-types";
 
 const KEYS = new Set<string>(PROFILE_FIELDS.map((f) => f.key));

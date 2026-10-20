@@ -7,7 +7,7 @@ import os from "os";
 import path from "path";
 import type { AddressInfo } from "net";
 import { DATA_DIR, DOCUMENTS_DIR, getDb } from "../src/lib/db";
-import { setProfileFacts } from "../src/lib/automation";
+import { setProfileFacts } from "../src/lib/profile";
 import { BrowserOwner, hostAllowed } from "../src/lib/apply/browser";
 import { Harness } from "../src/lib/apply/harness";
 import { accountPassword } from "../src/lib/apply/vault";

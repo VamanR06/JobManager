@@ -11,12 +11,11 @@ export const DATA_DIR = process.env.JOBMANAGER_DATA_DIR
   : path.join(process.cwd(), "data");
 export const RECORDINGS_DIR = path.join(DATA_DIR, "recordings");
 export const DOCUMENTS_DIR = path.join(DATA_DIR, "documents");
-/** Immutable, hashed resume artifacts produced by the automation worker. */
+/** Resume versions from the removed generator, submission payloads and receipts. */
 export const ARTIFACTS_DIR = path.join(DATA_DIR, "artifacts");
 /**
- * Private per-attempt directories for Codex runs. Deliberately outside this
- * repository, so Codex never treats the app repo (or its trust settings and
- * AGENTS.md) as the workspace of a resume job.
+ * Private scratch space outside the repository (e.g. files staged for upload
+ * under the name the employer will see).
  */
 export const WORK_DIR = process.env.JOBMANAGER_WORK_ROOT
   ? path.resolve(process.env.JOBMANAGER_WORK_ROOT)
@@ -111,7 +110,7 @@ function open(): Database.Database {
   fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
   fs.mkdirSync(DOCUMENTS_DIR, { recursive: true });
   const db = new Database(path.join(DATA_DIR, "app.db"));
-  // The web server and the worker share this file; wait on locks rather than failing.
+  // The web server and CLI tools (db:migrate) share this file; wait on locks rather than failing.
   db.pragma("busy_timeout = 5000");
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
@@ -467,6 +466,31 @@ const MIGRATIONS: { version: number; name: string; foreignKeysOff?: boolean; up:
           UNIQUE (host, email)
         );
       `);
+    },
+  },
+  {
+    version: 8,
+    name: "resume generation removed: every generated resume version not yet a document becomes an archived one",
+    up(db) {
+      // The resume_artifacts table (and the files in data/artifacts) stay; this only makes each
+      // PDF reachable from the Resumes page, archived so it stays out of the picker.
+      if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'resume_artifacts'").get()) return;
+      const rows = db.prepare(
+        `SELECT a.id, a.job_id, a.version, a.pdf_path, a.pdf_sha256, j.company
+           FROM resume_artifacts a JOIN jobs j ON j.id = a.job_id
+          WHERE NOT EXISTS (SELECT 1 FROM documents d WHERE d.file_path = a.pdf_path)
+          ORDER BY a.id`
+      ).all() as { id: number; job_id: number; version: number; pdf_path: string; pdf_sha256: string; company: string }[];
+      const insert = db.prepare(
+        `INSERT INTO documents (kind, name, file_path, archived, generated, source_job_id, version, content_sha256)
+         VALUES ('resume', ?, ?, 1, 1, ?, 1, ?)`
+      );
+      const link = db.prepare("UPDATE resume_artifacts SET document_id = ? WHERE id = ? AND document_id IS NULL");
+      for (const r of rows) {
+        if (!fs.existsSync(path.join(DATA_DIR, r.pdf_path))) continue;
+        const res = insert.run(`${r.company} resume (generated v${r.version}).pdf`, r.pdf_path, r.job_id, r.pdf_sha256);
+        link.run(res.lastInsertRowid, r.id);
+      }
     },
   },
 ];
