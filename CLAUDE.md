@@ -28,6 +28,7 @@ If a schema change is needed, add it as a new numbered entry in `MIGRATIONS` in 
 - Auto-save fields (event notes/links/score) debounce ~600ms, then flush on blur and on page unload — don't remove the `beforeunload`/`pagehide` flush, it's what prevents lost edits on refresh.
 - `updateEvent`/`updateJob` only overwrite fields explicitly passed (`undefined` = leave alone), so partial PATCHes are safe.
 - `jobs.workflow_state` (applying through ChatGPT) is separate from `status_events` (recruiting outcome). NULL = manually tracked job.
+- In-page scripts (`scan.ts`, `snapshot.ts`, `confirm.ts`) must run on Chromium 93: production uses Alpine's Chromium via `CHROMIUM_PATH`. No CSS `:has()` (Chrome 105), `structuredClone`, `findLast`, `toSorted` and the like.
 - Code passed to Playwright's `page.evaluate` must be a `String.raw` string, not a TS function (tsx injects `__name` helpers, and normal template literals eat regex backslashes).
 - Never add a submit action to the form adapter (`fill.ts`). The only submit path is `Harness.submit` in `apply/harness.ts`: required-field check, payload saved before the click, `submitting` claimed atomically, success only on the site's confirmation, otherwise `submission_unknown` (never auto-retried). `browser_click` must keep refusing submit-labelled buttons.
 - Portal passwords live only in `portal_accounts`, encrypted with `JOBMANAGER_VAULT_KEY`; never return them from a tool, log them, or add a plaintext fallback. CAPTCHAs and bot checks are reported to the user, never bypassed.

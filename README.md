@@ -142,7 +142,9 @@ With `JOBMANAGER_MCP_BROWSER=1`, ChatGPT can apply for a tracked job by driving 
 the portal, sign up or sign in, fill the form, attach the resume and, if you also allow it, submit. ChatGPT does the
 thinking; JobManager does the clicking and enforces the rules below. The browser is headless Chromium inside the
 web server itself, so it works on a server with no display. It uses its own profile
-(`~/.jobmanager/browser-profile-chatgpt`) and closes after 20 idle minutes.
+(`~/.jobmanager/browser-profile-chatgpt`), closes after 5 idle minutes, keeps at most 2 applications open at
+once, and closes an application's tab once its submission is confirmed. Tune those with
+`JOBMANAGER_BROWSER_IDLE_MINUTES` and `JOBMANAGER_BROWSER_MAX_TABS`: Chromium is most of the memory on a small server.
 
 | Tool | What it does |
 | --- | --- |
@@ -178,7 +180,11 @@ Setup, on the server:
 1. `npm run vault:key` and put the printed `JOBMANAGER_VAULT_KEY=…` line in `.env.local`. Keep a copy: changing
    it makes saved portal passwords unreadable.
 2. Add `JOBMANAGER_MCP_BROWSER=1` (and `JOBMANAGER_MCP_SUBMIT=1` if ChatGPT may submit).
-3. `npx playwright install --with-deps chromium` once (Linux needs the system libraries `--with-deps` installs).
+3. A Chromium for it to drive, either:
+   - one already installed: `CHROMIUM_PATH=/usr/bin/chromium-browser` (Alpine: `apk add chromium`). It runs with
+     `--no-sandbox --disable-dev-shm-usage --disable-gpu`, which containers need. The production server runs Alpine's
+     Chromium 93; very new site features or Playwright calls may fail on a build that old; or
+   - Playwright's own: `npx playwright install chromium` (add `--with-deps` if it reports missing libraries).
 4. `npm run db:migrate`, then restart the app.
 
 Then: "Apply to my Acme application with JobManager. Make an account if it needs one, and show me the answers
