@@ -139,6 +139,54 @@ read-only tools, and ChatGPT asks you to confirm each write.
   `curl -X POST https://<host>/api/mcp/<token> -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_applications","arguments":{}}}'`
   tests it.
 
+### Applying from ChatGPT (browser tools)
+
+With `JOBMANAGER_MCP_BROWSER=1`, ChatGPT can apply for a tracked job by driving a browser on the server: open
+the portal, sign up or sign in, fill the form, attach the resume and, if you also allow it, submit. ChatGPT does the
+thinking; JobManager does the clicking and enforces the rules below. The browser is headless Chromium inside the
+web server itself, so it works on a server with no display and no worker. It uses its own profile
+(`~/.jobmanager/browser-profile-chatgpt`) and closes after 20 idle minutes.
+
+| Tool | What it does |
+| --- | --- |
+| `browser_open` | Opens the application page (the ATS form for Greenhouse/Lever/Ashby, else the posting URL) and returns a snapshot |
+| `browser_snapshot` / `browser_screenshot` | The page as a list of elements with refs (labels, values, options, errors, CAPTCHA blockers), or as an image |
+| `browser_click` / `browser_type` / `browser_choose` / `browser_navigate` | Act on a ref; each returns a fresh snapshot |
+| `browser_upload` | Attaches the application's resume (approved generated one, else the linked one), its cover letter, or any document |
+| `browser_autofill` | Fills everything your Profile and saved answers cover, using the same rules as the queue's prepare step, and lists what's left |
+| `portal_credentials` | `create`: generates a strong password, saves it encrypted, and fills the sign-up form. `sign_in`: fills the saved one |
+| `submit_application` | Only with `JOBMANAGER_MCP_SUBMIT=1` as well. Submits with the checks below |
+
+What it guarantees whatever ChatGPT asks:
+
+- **Only the employer's sites.** A tab can go only to the application's own hosts (posting URL, application URL)
+  and known ATS domains (`*.myworkdayjobs.com`, `*.greenhouse.io`, `*.icims.com`, …). Add others with
+  `JOBMANAGER_BROWSER_EXTRA_HOSTS=careers.example.com,…`.
+- **ChatGPT never sees a password.** Passwords are generated per portal, encrypted (AES-256-GCM) with
+  `JOBMANAGER_VAULT_KEY`, and typed straight into the page. `browser_type` refuses password fields. Without the
+  key, account creation is refused rather than storing anything in plain text. Verification codes sent by email or
+  text are yours to give ChatGPT; it doesn't read your email.
+- **Submitting is its own step.** `browser_click` refuses any button whose label says it submits the application.
+  `submit_application` refuses while a required field is empty or a CAPTCHA is showing. It saves exactly what's
+  being sent (`data/artifacts/job-<id>/submission-*.json`) before clicking, and counts the application as submitted
+  only when the site shows its confirmation. That adds an **Applied** status and a receipt screenshot. If the site
+  shows no confirmation, the application becomes **Submission unknown** and can't be submitted again until you
+  check and press **I submitted it** or **It didn't go through** on the queue. ChatGPT is told to get your go-ahead
+  before each submit, and ChatGPT itself asks you to confirm the call.
+- **CAPTCHAs and bot checks stop it.** They're reported, never worked around. Many portals block headless browsers;
+  apply to those yourself.
+
+Setup, on the server:
+
+1. `npm run vault:key` and put the printed `JOBMANAGER_VAULT_KEY=…` line in `.env.local`. Keep a copy: changing
+   it makes saved portal passwords unreadable.
+2. Add `JOBMANAGER_MCP_BROWSER=1` (and `JOBMANAGER_MCP_SUBMIT=1` if ChatGPT may submit).
+3. `npx playwright install --with-deps chromium` once (Linux needs the system libraries `--with-deps` installs).
+4. `npm run db:migrate`, then restart the app.
+
+Then: "Apply to my Acme application with JobManager. Make an account if it needs one, and show me the answers
+before submitting."
+
 ## Features
 
 ### Applications

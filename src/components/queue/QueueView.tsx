@@ -17,7 +17,7 @@ const FILTERS: { key: string; label: string; match: (s: WorkflowState) => boolea
   { key: "done", label: "Done / cancelled", match: (s) => s === "submitted" || s === "cancelled" },
 ];
 
-type Action = "pause" | "resume" | "cancel" | "retry" | "continue" | "mark_submitted";
+type Action = "pause" | "resume" | "cancel" | "retry" | "continue" | "mark_submitted" | "not_submitted";
 
 export default function QueueView({ initial }: { initial: QueueRow[] }) {
   const [rows, setRows] = useState(initial);
@@ -111,9 +111,14 @@ export default function QueueView({ initial }: { initial: QueueRow[] }) {
                             Continue
                           </button>
                         )}
-                        {(r.workflow_state === "ready_to_submit" || (r.workflow_state === "needs_input" && r.latest_artifact_status === "approved")) && (
+                        {(r.workflow_state === "ready_to_submit" || r.workflow_state === "submission_unknown" || (r.workflow_state === "needs_input" && r.latest_artifact_status === "approved")) && (
                           <button className={`${btn} text-green-700 dark:text-green-400`} onClick={() => act(r.job_id, "mark_submitted")} title="Use this if you submitted it yourself and it wasn't detected">
                             I submitted it
+                          </button>
+                        )}
+                        {r.workflow_state === "submission_unknown" && (
+                          <button className={btn} onClick={() => act(r.job_id, "not_submitted")} title="You checked the portal and your email: it didn't go through">
+                            It didn&apos;t go through
                           </button>
                         )}
                         {(blocked || stopped || r.workflow_state === "retry_wait") && (

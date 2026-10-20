@@ -4,7 +4,8 @@ import {
 } from "@/lib/automation";
 import { saveAnswer } from "@/lib/apply/answers";
 import { getJob, getPosting } from "@/lib/queries";
-import { cancelJob, logEvent, pauseJob, retryJob } from "@/lib/queue";
+import { getDb } from "@/lib/db";
+import { cancelJob, logEvent, pauseJob, retryJob, setWorkflow } from "@/lib/queue";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -20,6 +21,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
  *   continue — use the description saved on the job page, then generate the resume
  *   automate — bring an application added by hand into the pipeline
  *   regenerate {engine?} — new resume run, on "codex" or "claude" if given
+ *   mark_submitted — you submitted it (the watcher didn't see it, or a submission was unknown)
+ *   not_submitted — after "submission unknown": you checked, and it didn't go through
  */
 export async function POST(req: NextRequest, { params }: Params) {
   const id = Number((await params).id);
@@ -49,6 +52,14 @@ export async function POST(req: NextRequest, { params }: Params) {
           return NextResponse.json({ error: "Already marked submitted" }, { status: 409 });
         }
         break;
+      case "not_submitted": {
+        const row = getDb().prepare("SELECT workflow_state FROM jobs WHERE id = ?").get(id) as { workflow_state: string | null };
+        if (row.workflow_state !== "submission_unknown") {
+          return NextResponse.json({ error: "Only for a submission whose outcome is unknown" }, { status: 409 });
+        }
+        setWorkflow(id, "ready_to_submit", "You checked: the submission didn't go through. It can be submitted again.");
+        break;
+      }
       case "prepare":
         if (!approvedArtifact(id)) return NextResponse.json({ error: "Approve a resume first" }, { status: 400 });
         retryJob(id, "prepare");

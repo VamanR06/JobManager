@@ -452,6 +452,23 @@ const MIGRATIONS: { version: number; name: string; foreignKeysOff?: boolean; up:
       `);
     },
   },
+  {
+    version: 7,
+    name: "portal accounts for the ChatGPT browser tools (passwords encrypted with JOBMANAGER_VAULT_KEY)",
+    up(db) {
+      db.exec(`
+        CREATE TABLE portal_accounts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          host TEXT NOT NULL,
+          email TEXT NOT NULL,
+          secret_enc TEXT NOT NULL,
+          job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          UNIQUE (host, email)
+        );
+      `);
+    },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;

@@ -14,6 +14,7 @@
     "auth:hash": "tsx scripts/hash-password.ts",
     "inbox:token": "tsx scripts/inbox-token.ts",
     "mcp:token": "tsx scripts/mcp-token.ts",
+    "vault:key": "tsx scripts/vault-key.ts",
     "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {

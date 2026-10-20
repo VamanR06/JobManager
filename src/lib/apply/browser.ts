@@ -11,8 +11,26 @@ import { assertPublicUrl } from "../netguard";
  *
  * Each job's tab may only navigate (top-level) to that job's application
  * hosts; anything else — including links in a posting — is blocked, so
- * personal data typed here only goes to the selected employer's ATS.
+ * personal data typed here only goes to the selected employer's ATS. A host
+ * starting with "." allows that domain and its subdomains (".myworkdayjobs.com").
+ *
+ * Headless when JOBMANAGER_BROWSER_HEADLESS=1, or on Linux with no display
+ * (a server).
  */
+
+export function hostAllowed(hosts: Set<string> | string[], hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  for (const a of hosts) {
+    if (a.startsWith(".") ? h === a.slice(1) || h.endsWith(a) : h === a) return true;
+  }
+  return false;
+}
+
+export function defaultHeadless(): boolean {
+  if (process.env.JOBMANAGER_BROWSER_HEADLESS === "1") return true;
+  if (process.env.JOBMANAGER_BROWSER_HEADLESS === "0") return false;
+  return process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY;
+}
 
 export interface BrowserOptions {
   headless?: boolean;
@@ -38,7 +56,7 @@ export class BrowserOwner {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.chmodSync(dir, 0o700);
     this.ctx = await chromium.launchPersistentContext(dir, {
-      headless: this.opts.headless ?? process.env.JOBMANAGER_BROWSER_HEADLESS === "1",
+      headless: this.opts.headless ?? defaultHeadless(),
       viewport: null,
       acceptDownloads: false,
     });
@@ -71,7 +89,7 @@ export class BrowserOwner {
         const page = frame?.page();
         const hosts = page ? this.allowed.get(page) : this.allAllowedHosts();
         const url = new URL(req.url());
-        let ok = !!hosts && hosts.has(url.hostname);
+        let ok = !!hosts && hostAllowed(hosts, url.hostname);
         if (ok && !this.opts.allowLocal) {
           try {
             await assertPublicUrl(url);
@@ -138,6 +156,17 @@ export class BrowserOwner {
     const all = new Set<string>();
     for (const p of this.pages.values()) for (const h of this.allowed.get(p) ?? []) all.add(h);
     return all;
+  }
+
+  /** The job's open tab, if any. */
+  existingPage(jobId: number): Page | null {
+    const p = this.pages.get(jobId);
+    return p && !p.isClosed() ? p : null;
+  }
+
+  /** The hosts the job's tab may navigate to. */
+  allowedHosts(page: Page): Set<string> {
+    return this.allowed.get(page) ?? new Set();
   }
 
   hasPage(jobId: number): boolean {
