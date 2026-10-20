@@ -15,7 +15,9 @@ import { assertPublicUrl } from "../netguard";
  * starting with "." allows that domain and its subdomains (".myworkdayjobs.com").
  *
  * Headless when JOBMANAGER_BROWSER_HEADLESS=1, or on Linux with no display
- * (a server).
+ * (a server). CHROMIUM_PATH runs an installed Chromium (e.g. Alpine's
+ * /usr/bin/chromium-browser) instead of Playwright's download, with the flags
+ * a small container needs.
  */
 
 export function hostAllowed(hosts: Set<string> | string[], hostname: string): boolean {
@@ -55,10 +57,18 @@ export class BrowserOwner {
     const dir = this.opts.profileDir ?? PROFILE_DIR;
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.chmodSync(dir, 0o700);
+    const headless = this.opts.headless ?? defaultHeadless();
+    const system = process.env.CHROMIUM_PATH?.trim();
     this.ctx = await chromium.launchPersistentContext(dir, {
-      headless: this.opts.headless ?? defaultHeadless(),
-      viewport: null,
+      headless,
+      // Headless has no window to size the page by; use a desktop size so forms lay out normally.
+      viewport: headless ? { width: 1280, height: 900 } : null,
       acceptDownloads: false,
+      ...(system && {
+        executablePath: system,
+        // No sandbox (containers usually can't provide one), /tmp instead of a small /dev/shm, no GPU.
+        args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+      }),
     });
     this.ctx.on("close", () => {
       this.ctx = null;

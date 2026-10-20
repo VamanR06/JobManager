@@ -93,7 +93,9 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
   const questionOf = (el) => {
     const box = el.closest("fieldset, [role=radiogroup], [role=group], .application-question, .form-group, [class*='fieldEntry']");
     if (!box) return "";
-    const h = box.querySelector("legend, .application-label, [class*='question'], [class*='label'], label:not(:has(input))");
+    // A heading, or a label that isn't one option's own label. (No :has(): servers may run Chromium < 105.)
+    const h = Array.from(box.querySelectorAll("legend, .application-label, [class*='question'], [class*='label'], label"))
+      .find((c) => c.tagName !== "LABEL" || !c.querySelector("input"));
     return h ? clean(h.textContent) : "";
   };
 

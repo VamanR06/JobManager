@@ -102,10 +102,27 @@ export class Harness {
 
   constructor(
     private browser: BrowserOwner,
-    private opts: { idleCloseMs?: number } = {},
+    private opts: { idleCloseMs?: number; maxTabs?: number } = {},
   ) {}
 
+  /** When each application's tab was last used, for closing the oldest. */
+  private lastUsed = new Map<number, number>();
+
+  /** Closes the least recently used other applications' tabs beyond maxTabs. */
+  private async trimTabs(keep: number) {
+    const max = this.opts.maxTabs;
+    if (!max) return;
+    const others = this.browser.openPages()
+      .filter(([id]) => id !== keep && !this.locks.has(id))
+      .sort(([a], [b]) => (this.lastUsed.get(a) ?? 0) - (this.lastUsed.get(b) ?? 0));
+    for (const [id, page] of others.slice(0, Math.max(0, others.length - (max - 1)))) {
+      await page.close().catch(() => {});
+      this.lastUsed.delete(id);
+    }
+  }
+
   private async locked<T>(jobId: number, fn: () => Promise<T>): Promise<T> {
+    this.lastUsed.set(jobId, Date.now());
     const prev = this.locks.get(jobId) ?? Promise.resolve();
     const run = prev.catch(() => {}).then(fn);
     this.locks.set(jobId, run);
@@ -171,6 +188,7 @@ export class Harness {
         );
       }
       const existing = this.browser.existingPage(jobId);
+      if (!existing) await this.trimTabs(jobId);
       const page = await this.browser.pageFor(jobId, go, target.hosts, !!url && !!existing);
       await settle(page);
       const email = getProfileMap().email;
@@ -452,13 +470,13 @@ export class Harness {
    */
   submit(jobId: number, ref: string): Promise<ActionResult & { submitted: boolean; state: string }> {
     return this.locked(jobId, async () => {
-      let page = this.page(jobId);
       const db = getDb();
       const before = db.prepare("SELECT workflow_state FROM jobs WHERE id = ?").get(jobId) as { workflow_state: string | null };
       if (before.workflow_state === "submitted") throw new HarnessError("This application is already recorded as submitted.");
       if (before.workflow_state === "submitting" || before.workflow_state === "submission_unknown") {
         throw new HarnessError("A submission for this application may already have gone through. Don't submit again: ask the user to check the portal or their email, then mark it on the job page.");
       }
+      let page = this.page(jobId);
       const snap = await takeSnapshot(page);
       if (snap.blockers.length) throw new HarnessError(`Can't submit: ${snap.blockers.join("; ")}. The user has to deal with that.`);
       const missing = await requiredEmpty(page);
@@ -508,7 +526,9 @@ export class Harness {
       }
       if (check?.confirmed) {
         const receipt = await this.recordConfirmed(jobId, page, check, "Submitted through ChatGPT");
-        return { ...(await this.withSnapshot(page)), submitted: true, state: "submitted", note: `Submitted; the site confirmed it ("${check.snippet}").${receipt ? " Receipt screenshot saved." : ""}` };
+        const done = await this.withSnapshot(page);
+        await page.close().catch(() => {}); // nothing left to do there; frees the memory
+        return { ...done, submitted: true, state: "submitted", note: `Submitted; the site confirmed it ("${check.snippet}"). Receipt screenshot saved${receipt ? "" : " failed"}; the tab is closed.` };
       }
       const after = await takeSnapshot(page);
       const formStillThere = after.elements.some((e) => e.ref === ref) || (await requiredEmpty(page).catch(() => [])).length > 0 || after.errors.length > 0;
@@ -526,8 +546,18 @@ export class Harness {
   }
 }
 
-/** The server's harness: one browser, its own profile, closed after 20 idle minutes. */
+/**
+ * The server's harness: one browser with its own profile, closed after
+ * JOBMANAGER_BROWSER_IDLE_MINUTES unused (default 5), with at most
+ * JOBMANAGER_BROWSER_MAX_TABS applications open at once (default 2) — Chromium
+ * is most of the memory on a small server.
+ */
 const g = globalThis as { __jmHarness?: Harness };
 export function serverHarness(): Harness {
-  return (g.__jmHarness ??= new Harness(new BrowserOwner({ profileDir: `${PROFILE_DIR}-chatgpt` }), { idleCloseMs: 20 * 60_000 }));
+  const idleMinutes = Number(process.env.JOBMANAGER_BROWSER_IDLE_MINUTES);
+  const maxTabs = Number(process.env.JOBMANAGER_BROWSER_MAX_TABS);
+  return (g.__jmHarness ??= new Harness(new BrowserOwner({ profileDir: `${PROFILE_DIR}-chatgpt` }), {
+    idleCloseMs: (idleMinutes > 0 ? idleMinutes : 5) * 60_000,
+    maxTabs: maxTabs >= 1 ? Math.floor(maxTabs) : 2,
+  }));
 }

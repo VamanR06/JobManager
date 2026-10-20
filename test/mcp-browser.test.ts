@@ -211,3 +211,18 @@ test("a submit the site doesn't confirm is unknown and can't be retried", async 
     assert.match((await call("submit_application", { application_id: id, ref: "e1" })).error!, /may already have gone through/);
   });
 });
+
+test("only the most recent applications keep a tab open", async () => {
+  const small = new Harness(browser, { maxTabs: 1 });
+  const a = newApplication("portal-apply.html");
+  const b = newApplication("portal-signup.html");
+  await small.open(a);
+  assert.ok(browser.existingPage(a));
+  await small.open(b);
+  assert.equal(browser.existingPage(a), null, "the older tab was closed");
+  assert.ok(browser.existingPage(b));
+  // Reopening the first one just loads it again.
+  const again = await small.open(a);
+  assert.match(again.snapshot.title, /Apply/);
+  assert.equal(browser.existingPage(b), null);
+});
