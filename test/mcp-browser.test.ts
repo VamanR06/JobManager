@@ -226,3 +226,31 @@ test("only the most recent applications keep a tab open", async () => {
   assert.match(again.snapshot.title, /Apply/);
   assert.equal(browser.existingPage(b), null);
 });
+
+test("checkVisibility stand-in for old Chromium matches what's shown", async () => {
+  const { COMPAT_SCRIPT } = await import("../src/lib/apply/browser");
+  const id = newApplication("portal-apply.html");
+  await harness.open(id);
+  const page = browser.existingPage(id)!;
+  const seen = await page.evaluate(String.raw`(() => {
+    delete Element.prototype.checkVisibility;
+    ${COMPAT_SCRIPT};
+    document.body.insertAdjacentHTML("beforeend",
+      '<div id="gone" style="display:none"><span id="inside">x</span></div><span id="ghost" style="visibility:hidden">y</span><span id="clear" style="opacity:0">z</span>');
+    const v = (s, o) => document.querySelector(s).checkVisibility(o);
+    return [v("#first"), v("#inside"), v("#ghost"), v("#ghost", { checkVisibilityCSS: true }), v("#clear", { checkOpacity: true })];
+  })()`);
+  assert.deepEqual(seen, [true, false, true, false, false]);
+});
+
+test("browser failures name the tool, the page and the browser", async () => {
+  await withFlags({ JOBMANAGER_MCP_BROWSER: "1" }, async () => {
+    const id = newApplication("portal-apply.html");
+    const r = await call("browser_open", { application_id: id });
+    // A text box isn't an upload button: no file picker opens, so Playwright times out.
+    const err = (await call("browser_upload", { application_id: id, ref: el(r.data.snapshot, /First name/).ref })).error!;
+    assert.match(err, /^Browser error in browser_upload: /);
+    assert.match(err, /page http:\/\/127\.0\.0\.1:\d+\/portal-apply\.html/);
+    assert.match(err, /HeadlessChrome\/[\d.]+|Chrom(e|ium)\/[\d.]+/);
+  });
+});

@@ -173,6 +173,17 @@ export class Harness {
     return this.browser.blockedNavigations.slice(before).map((u) => hostOf(u) ?? u);
   }
 
+  /** Where a job's tab is and which browser it runs, for error logs. Never throws. */
+  async debugInfo(jobId: number): Promise<{ url: string | null; browser: string | null }> {
+    const page = this.browser.existingPage(jobId);
+    if (!page) return { url: null, browser: null };
+    const ua = (await Promise.race([
+      page.evaluate("navigator.userAgent").catch(() => null),
+      new Promise((r) => setTimeout(() => r(null), 2_000)),
+    ])) as string | null;
+    return { url: page.url(), browser: ua?.match(/(Headless)?Chrom(e|ium)\/[\d.]+/)?.[0] ?? ua };
+  }
+
   // ---------- actions ----------
 
   open(jobId: number, url?: string): Promise<ActionResult> {
