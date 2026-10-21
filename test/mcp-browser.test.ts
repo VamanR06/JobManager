@@ -319,3 +319,43 @@ test("the verification-code route checks the code before touching the browser", 
   assert.equal(noTab.status, 409, "no browser tab open for it in the server's harness");
   assert.match((await noTab.json()).error, /tab has closed/);
 });
+
+test("stand-ins for newer JavaScript match the real built-ins, and leave real ones alone", async () => {
+  const { POLYFILL_SCRIPT } = await import("../src/lib/apply/polyfills");
+  const id = newApplication("portal-apply.html");
+  await harness.open(id);
+  const page = browser.existingPage(id)!;
+  // A browser that has them (Chrome 97+) keeps its own versions.
+  const major = Number(((await page.evaluate("navigator.userAgent")) as string).match(/Chrom(?:e|ium)\/(\d+)/)![1]);
+  assert.equal(await page.evaluate("String(Array.prototype.findLast).includes('[native code]')"), major >= 97);
+  const out = await page.evaluate(String.raw`(() => {
+    for (const [o, k] of [[Array.prototype, "findLast"], [Array.prototype, "findLastIndex"], [Array.prototype, "toSorted"],
+      [Array.prototype, "toReversed"], [Array.prototype, "toSpliced"], [Array.prototype, "with"], [Object, "groupBy"],
+      [Map, "groupBy"], [Promise, "withResolvers"], [Set.prototype, "union"], [Set.prototype, "intersection"],
+      [Set.prototype, "difference"], [Set.prototype, "isSubsetOf"], [globalThis, "structuredClone"], [String.prototype, "isWellFormed"]]) delete o[k];
+    ${POLYFILL_SCRIPT};
+    const a = [3, 1, 2];
+    const orig = { d: new Date(0), m: new Map([[1, { x: [1] }]]) };
+    orig.self = orig;
+    const clone = structuredClone(orig);
+    return {
+      findLast: a.findLast((x) => x < 3), findLastIndex: a.findLastIndex((x) => x > 5),
+      typed: new Int8Array([1, 2, 3]).findLast((x) => x < 3),
+      toSorted: a.toSorted(), toReversed: a.toReversed(), toSpliced: a.toSpliced(1, 1, 9, 8), with: a.with(-1, 7), untouched: a,
+      groupBy: Object.groupBy([1, 2, 3, 4], (x) => (x % 2 ? "odd" : "even")),
+      mapGroup: Array.from(Map.groupBy([1, 2, 3], (x) => x > 1).entries()),
+      union: Array.from(new Set([1, 2]).union(new Set([2, 3]))), inter: Array.from(new Set([1, 2]).intersection(new Set([2, 3]))),
+      diff: Array.from(new Set([1, 2]).difference(new Set([2]))), subset: new Set([1]).isSubsetOf(new Set([1, 2])),
+      cloneIsCopy: clone !== orig && clone.d !== orig.d && clone.d.getTime() === 0 && clone.m.get(1).x[0] === 1 && clone.self === clone,
+      wellFormed: ["ok".isWellFormed(), "\uD800".isWellFormed()],
+      enumerable: Object.keys(Array.prototype).length,
+    };
+  })()`);
+  assert.deepEqual(out, {
+    findLast: 2, findLastIndex: -1, typed: 2,
+    toSorted: [1, 2, 3], toReversed: [2, 1, 3], toSpliced: [3, 9, 8, 2], with: [3, 1, 7], untouched: [3, 1, 2],
+    groupBy: { odd: [1, 3], even: [2, 4] }, mapGroup: [[false, [1]], [true, [2, 3]]],
+    union: [1, 2, 3], inter: [2], diff: [1], subset: true, cloneIsCopy: true, wellFormed: [true, false],
+    enumerable: 0,
+  });
+});
