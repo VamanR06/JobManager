@@ -164,7 +164,9 @@ What it guarantees whatever ChatGPT asks:
 - **ChatGPT never sees a password.** Passwords are generated per portal, encrypted (AES-256-GCM) with
   `JOBMANAGER_VAULT_KEY`, and typed straight into the page. `browser_type` refuses password fields. Without the
   key, account creation is refused rather than storing anything in plain text. Verification codes sent by email or
-  text are yours to give ChatGPT; it doesn't read your email.
+  text don't go through ChatGPT: when a site asks for one (Greenhouse does after the first Submit), ChatGPT sends
+  you to the job page, you type it in the **Verification code** box there, which enters it straight into the form,
+  and ChatGPT submits again. It doesn't read your email.
 - **Submitting is its own step.** `browser_click` refuses any button whose label says it submits the application.
   `submit_application` refuses while a CAPTCHA is showing. It saves exactly what's being sent
   (`data/artifacts/job-<id>/submission-*.json`) before clicking, and counts the application as submitted only when

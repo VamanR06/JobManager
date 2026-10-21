@@ -115,7 +115,7 @@ export const BROWSER_TOOLS = [
   {
     name: "portal_credentials",
     title: "Sign up or sign in on the portal",
-    description: `For job portals that need an account. mode "create" generates a strong password, saves it encrypted on the server and fills the sign-up form's email and password fields; mode "sign_in" fills the saved one. You never see the password. Then click the form's button yourself. Email/phone verification codes: ask the user. If the site rejected a sign-up (e.g. password rules) and no account exists, call create again with replace: true. ${SNAPSHOT_NOTE}`,
+    description: `For job portals that need an account. mode "create" generates a strong password, saves it encrypted on the server and fills the sign-up form's email and password fields; mode "sign_in" fills the saved one. You never see the password. Then click the form's button yourself. If the site sends an email/phone verification code, don't ask for it in chat: the user enters it in the Verification code box on the application's JobManager page (/jobs/<application_id>), then you continue. If the site rejected a sign-up (e.g. password rules) and no account exists, call create again with replace: true. ${SNAPSHOT_NOTE}`,
     inputSchema: {
       type: "object",
       properties: {
@@ -283,8 +283,12 @@ async function dispatchBrowserTool(name: string, args: Record<string, unknown>, 
         }));
       }
       case "submit_application": {
-        const { receipt_file, ...done } = await harness.submit(id, str(args.ref, "ref")) as Awaited<ReturnType<Harness["submit"]>> & { receipt_file?: string };
-        return json(receipt_file ? { ...done, receipt_url: fileLink(baseUrl, id, receipt_file) } : done);
+        const { receipt_file, ...done } = await harness.submit(id, str(args.ref, "ref")) as Awaited<ReturnType<Harness["submit"]>> & { receipt_file?: string; needs_code?: boolean };
+        return json({
+          ...done,
+          ...(receipt_file && { receipt_url: fileLink(baseUrl, id, receipt_file) }),
+          ...(done.needs_code && { code_entry_url: `${baseUrl ?? ""}/jobs/${id}` }),
+        });
       }
     }
   } catch (err) {

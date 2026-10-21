@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Greenhouse-style application with a security code</title></head><body>
+<form id="app" onsubmit="event.preventDefault(); send();">
+  <label for="first">First name</label><input id="first" required>
+  <div id="code" hidden>
+    <p>Enter the 8-character security code we sent to your email to finish your application.</p>
+    <div role="group" aria-label="Security code"></div>
+    <div id="bad" role="alert" hidden>That code isn't right</div>
+  </div>
+  <button type="submit">Submit application</button>
+</form>
+<script>
+  const boxes = document.querySelector("#code [role=group]");
+  for (let i = 1; i <= 8; i++) {
+    const b = document.createElement("input");
+    b.maxLength = 1;
+    b.setAttribute("aria-label", "Security code character " + i);
+    boxes.appendChild(b);
+  }
+  window.__sends = 0;
+  function send() {
+    const shown = !document.getElementById("code").hidden;
+    if (!shown) {
+      document.getElementById("code").hidden = false; // the site emails a code first
+      return;
+    }
+    const entered = Array.from(boxes.querySelectorAll("input")).map((i) => i.value).join("");
+    if (entered !== "AB12CD34") { document.getElementById("bad").hidden = false; return; }
+    window.__sends++;
+    document.body.innerHTML = "<h1>Thank you for applying!</h1><p>Your application has been submitted.</p>";
+  }
+</script>
+</body></html>
