@@ -258,3 +258,21 @@ test("browser failures name the tool, the page and the browser", async () => {
     assert.match(err, /HeadlessChrome\/[\d.]+|Chrom(e|ium)\/[\d.]+/);
   });
 });
+
+test("a Greenhouse dropdown with an option chosen counts as filled", async () => {
+  const { requiredEmpty } = await import("../src/lib/apply/snapshot");
+  const id = newApplication("greenhouse.html");
+  let r = await harness.open(id);
+  const degree = r.snapshot.elements.find((e) => /^Degree/.test(e.label))!;
+  assert.equal(degree.kind, "combobox");
+  const page = browser.existingPage(id)!;
+  assert.ok((await requiredEmpty(page)).some((l) => /^Degree/.test(l)), "empty before choosing");
+
+  r = await harness.choose(id, degree.ref, "Bachelor's Degree");
+  // react-select empties its search box after a pick and shows the choice beside it.
+  assert.equal(await page.locator("#degree--0").inputValue(), "");
+  assert.equal(r.snapshot.elements.find((e) => e.ref === degree.ref)!.value, "Bachelor's Degree");
+  const missing = await requiredEmpty(page);
+  assert.ok(!missing.some((l) => /^Degree/.test(l)), `Degree still reported empty: ${missing.join(", ")}`);
+  assert.ok(missing.some((l) => /^School/.test(l)), "untouched dropdowns are still reported");
+});
