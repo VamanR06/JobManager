@@ -42,32 +42,26 @@ export interface BrowserOptions {
 }
 
 /**
- * Runs in every page and frame before the site's scripts. Element.checkVisibility
- * arrived in Chrome 105; Playwright uses it when Element.prototype has it, so a
- * page that half-defines it (e.g. a site polyfill in one frame only) on an older
- * Chromium makes Playwright fail with "element.checkVisibility is not a function".
- * Defining it everywhere up front keeps old Chromium (the server's 93) working.
+ * Playwright 1.64+ calls Element.checkVisibility (Chrome 105+) unconditionally,
+ * so it can't drive an older Chromium, like the server's Alpine Chromium 93:
+ * every action fails with "element.checkVisibility is not a function". 1.63
+ * checks first and falls back. package.json pins playwright to 1.63.0; this
+ * catches a server that installed something newer anyway.
  */
-export const COMPAT_SCRIPT = String.raw`(() => {
-  if (typeof Element === "undefined" || typeof Element.prototype.checkVisibility === "function") return;
-  Object.defineProperty(Element.prototype, "checkVisibility", {
-    configurable: true, writable: true,
-    value: function checkVisibility(o) {
-      o = o || {};
-      if (!this.isConnected) return false;
-      for (let el = this; el; ) {
-        const st = getComputedStyle(el);
-        if (st.display === "none") return false;
-        if (el !== this && st.contentVisibility === "hidden") return false;
-        if ((o.checkOpacity || o.opacityProperty) && st.opacity === "0") return false;
-        const root = el.getRootNode && el.getRootNode();
-        el = el.parentElement || (root && root.host) || null;
-      }
-      if ((o.checkVisibilityCSS || o.visibilityProperty) && getComputedStyle(this).visibility !== "visible") return false;
-      return true;
-    },
-  });
-})()`;
+export function checkPlaywrightFits(playwrightVersion: string, browserHasCheckVisibility: boolean): string | null {
+  const [major, minor] = playwrightVersion.split(".").map(Number);
+  if (browserHasCheckVisibility || major < 1 || (major === 1 && minor <= 63)) return null;
+  return `Playwright ${playwrightVersion} needs Chromium 105 or newer, but CHROMIUM_PATH is an older Chromium. On the server, run: npm install --save-exact playwright@1.63.0 (then restart), or point CHROMIUM_PATH at a newer Chromium.`;
+}
+
+function installedPlaywright(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return (require("playwright-core/package.json") as { version: string }).version;
+  } catch {
+    return "unknown";
+  }
+}
 
 export const PROFILE_DIR = path.join(path.dirname(WORK_DIR), "browser-profile");
 
@@ -98,10 +92,18 @@ export class BrowserOwner {
         args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
       }),
     });
-    await this.ctx.addInitScript(COMPAT_SCRIPT);
-    // Pages already open (a persistent context starts with one) get it now too.
-    for (const p of this.ctx.pages()) await p.evaluate(COMPAT_SCRIPT).catch(() => {});
-    console.log(`[browser] launched ${system ? `CHROMIUM_PATH=${system}` : "Playwright's Chromium"}, ${headless ? "headless" : "windowed"}, profile ${dir}`);
+    const pw = installedPlaywright();
+    const first = this.ctx.pages()[0] ?? (await this.ctx.newPage());
+    const native = (await first.evaluate("typeof Element.prototype.checkVisibility === 'function'").catch(() => true)) as boolean;
+    const misfit = checkPlaywrightFits(pw, native);
+    console.log(`[browser] launched ${system ? `CHROMIUM_PATH=${system}` : "Playwright's Chromium"} (${await first.evaluate("navigator.userAgent").catch(() => "?")}), playwright ${pw}, ${headless ? "headless" : "windowed"}, profile ${dir}`);
+    if (misfit) {
+      console.error(`[browser] ${misfit}`);
+      const ctx = this.ctx;
+      this.ctx = null;
+      await ctx.close().catch(() => {});
+      throw new Error(misfit);
+    }
     this.ctx.on("close", () => {
       this.ctx = null;
       this.pages.clear();

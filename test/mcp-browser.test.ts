@@ -227,20 +227,12 @@ test("only the most recent applications keep a tab open", async () => {
   assert.equal(browser.existingPage(b), null);
 });
 
-test("checkVisibility stand-in for old Chromium matches what's shown", async () => {
-  const { COMPAT_SCRIPT } = await import("../src/lib/apply/browser");
-  const id = newApplication("portal-apply.html");
-  await harness.open(id);
-  const page = browser.existingPage(id)!;
-  const seen = await page.evaluate(String.raw`(() => {
-    delete Element.prototype.checkVisibility;
-    ${COMPAT_SCRIPT};
-    document.body.insertAdjacentHTML("beforeend",
-      '<div id="gone" style="display:none"><span id="inside">x</span></div><span id="ghost" style="visibility:hidden">y</span><span id="clear" style="opacity:0">z</span>');
-    const v = (s, o) => document.querySelector(s).checkVisibility(o);
-    return [v("#first"), v("#inside"), v("#ghost"), v("#ghost", { checkVisibilityCSS: true }), v("#clear", { checkOpacity: true })];
-  })()`);
-  assert.deepEqual(seen, [true, false, true, false, false]);
+test("a Playwright too new for an old Chromium is caught with a clear fix", async () => {
+  const { checkPlaywrightFits } = await import("../src/lib/apply/browser");
+  assert.equal(checkPlaywrightFits("1.63.0", false), null, "1.63 works with Chromium 93");
+  assert.equal(checkPlaywrightFits("1.64.0", true), null, "any version works with a new Chromium");
+  assert.match(checkPlaywrightFits("1.64.0", false)!, /npm install --save-exact playwright@1\.63\.0/);
+  assert.match(checkPlaywrightFits("2.0.0", false)!, /Chromium 105/);
 });
 
 test("browser failures name the tool, the page and the browser", async () => {
