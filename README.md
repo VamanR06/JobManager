@@ -183,7 +183,9 @@ Setup, on the server:
 3. A Chromium for it to drive, either:
    - one already installed: `CHROMIUM_PATH=/usr/bin/chromium-browser` (Alpine: `apk add chromium`). It runs with
      `--no-sandbox --disable-dev-shm-usage --disable-gpu`, which containers need. The production server runs Alpine's
-     Chromium 93; very new site features or Playwright calls may fail on a build that old; or
+     Chromium 93. That's why `playwright` is pinned to exactly **1.63.0**: 1.64+ needs Chromium 105 and fails every
+     action with "element.checkVisibility is not a function". If the server's `node_modules` has a newer one, the
+     browser refuses to start and the log says to run `npm install --save-exact playwright@1.63.0`; or
    - Playwright's own: `npx playwright install chromium` (add `--with-deps` if it reports missing libraries).
 4. `npm run db:migrate`, then restart the app.
 
