@@ -281,3 +281,41 @@ test("a Greenhouse dropdown with an option chosen counts as filled", async () =>
   assert.ok(!missing.some((l) => /^Degree/.test(l)), `Degree still reported empty: ${missing.join(", ")}`);
   assert.ok(missing.some((l) => /^School/.test(l)), "untouched dropdowns are still reported");
 });
+
+test("a site's verification code is entered from the job page, not through ChatGPT", async () => {
+  await withFlags({ JOBMANAGER_MCP_BROWSER: "1", JOBMANAGER_MCP_SUBMIT: "1" }, async () => {
+    const id = newApplication("portal-code.html");
+    let r = await call("browser_open", { application_id: id });
+    r = await call("browser_type", { application_id: id, ref: el(r.data.snapshot, /First name/).ref, text: "Test" });
+    const submit = el(r.data.snapshot, /Submit application/).ref;
+
+    // First submit: the site emails a code and asks for it.
+    r = await call("submit_application", { application_id: id, ref: submit });
+    assert.equal(r.error, null, r.error ?? "");
+    assert.equal(r.data.submitted, false);
+    assert.equal(r.data.needs_code, true);
+    assert.equal(r.data.code_entry_url, `/jobs/${id}`);
+    assert.match(r.data.note, /Don't ask for the code in chat/);
+
+    // The person types it on the job page (one box per character here).
+    await harness.enterCode(id, "AB12CD34");
+    const boxes = await browser.existingPage(id)!.locator("[aria-label^='Security code character']").evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value).join(""));
+    assert.equal(boxes, "AB12CD34");
+
+    r = await call("submit_application", { application_id: id, ref: submit });
+    assert.equal(r.error, null, r.error ?? "");
+    assert.equal(r.data.submitted, true);
+  });
+});
+
+test("the verification-code route checks the code before touching the browser", async () => {
+  const { POST } = await import("../src/app/api/jobs/[id]/verification-code/route");
+  const id = newApplication("portal-code.html");
+  const post = (body: unknown) =>
+    POST(new NextRequest(`http://localhost/api/jobs/${id}/verification-code`, { method: "POST", body: JSON.stringify(body) }), { params: Promise.resolve({ id: String(id) }) });
+  assert.equal((await post({ code: "<script>" })).status, 400);
+  assert.equal((await post({ code: "" })).status, 400);
+  const noTab = await post({ code: "AB12 CD34" });
+  assert.equal(noTab.status, 409, "no browser tab open for it in the server's harness");
+  assert.match((await noTab.json()).error, /tab has closed/);
+});

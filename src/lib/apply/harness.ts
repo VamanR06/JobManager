@@ -34,6 +34,11 @@ import { accountPassword, createAccount, findAccount } from "./vault";
 
 export class HarnessError extends Error {}
 
+/** Labels of verification-code fields ("Security code", "Enter the code we sent", "One-time passcode"…). */
+const CODE_LABEL = /\b(security|verification|confirmation|one[- ]?time|access)\b.*\bcode\b|\bcode\b.*\b(sent|emailed|texted)\b|\b(otp|passcode|pin)\b|^code$|enter (the|your) code/i;
+/** Page text asking for such a code. */
+const CODE_REQUEST = /(security|verification|confirmation|one[- ]?time) code|code (we|was) (sent|emailed)|enter the code/i;
+
 /** ATS vendors whose subdomains host many employers' application portals. */
 const ATS_DOMAINS = [
   ".greenhouse.io", ".lever.co", ".ashbyhq.com", ".myworkdayjobs.com", ".myworkdaysite.com", ".myworkday.com",
@@ -184,6 +189,11 @@ export class Harness {
     return { url: page.url(), browser: ua?.match(/(Headless)?Chrom(e|ium)\/[\d.]+/)?.[0] ?? ua };
   }
 
+  /** Whether this application has a browser tab open (e.g. waiting for a verification code). */
+  hasTab(jobId: number): boolean {
+    return this.browser.hasPage(jobId);
+  }
+
   // ---------- actions ----------
 
   open(jobId: number, url?: string): Promise<ActionResult> {
@@ -290,6 +300,36 @@ export class Harness {
         note = `The site now shows a confirmation ("${check.snippet}"); recorded as submitted.`;
       }
       return this.withSnapshot(page, { note });
+    });
+  }
+
+  /**
+   * Types a verification code the person got by email/text into the page
+   * (one field, or one box per character). Called from the job page, so the
+   * code never passes through ChatGPT. Doesn't submit.
+   */
+  enterCode(jobId: number, code: string): Promise<ActionResult> {
+    return this.locked(jobId, async () => {
+      const page = this.browser.existingPage(jobId);
+      if (!page) throw new HarnessError("The application's browser tab has closed (it closes after a few idle minutes). Ask ChatGPT to open it again; the site may send a new code.");
+      const snap = await takeSnapshot(page);
+      const fields = snap.elements.filter((e) =>
+        ["text", "number", "tel", "textbox"].includes(e.kind) && !e.disabled && CODE_LABEL.test(e.label)
+      );
+      if (!fields.length) throw new HarnessError("No verification-code field is showing on the page. If the site asked for one, ask ChatGPT for a screenshot link to check.");
+      if (fields.length > 1 && fields.length === code.length) {
+        for (let i = 0; i < code.length; i++) await (await this.mustLocate(page, fields[i].ref)).loc.fill(code[i], { timeout: 5_000 });
+      } else if (fields.length > 1) {
+        // Boxes that don't match the code's length: type it and let the site move between boxes.
+        const { loc } = await this.mustLocate(page, fields[0].ref);
+        await loc.click({ timeout: 5_000 });
+        await page.keyboard.type(code, { delay: 50 });
+      } else {
+        await (await this.mustLocate(page, fields[0].ref)).loc.fill(code, { timeout: 5_000 });
+      }
+      await page.waitForTimeout(500);
+      logEvent(jobId, "chatgpt:verification_code", `Entered on the job page into ${fields.length} field${fields.length === 1 ? "" : "s"}`);
+      return this.withSnapshot(page, { note: "Verification code entered. Now call submit_application again." });
     });
   }
 
@@ -546,7 +586,11 @@ export class Harness {
         check = (await page.evaluate(CONFIRM_SCRIPT).catch(() => null)) as ConfirmationCheck | null;
         if (check?.confirmed || check?.warning) break;
         // The site rejected it outright: the button is still there and fields are flagged. No need to wait it out.
-        if (Date.now() - clickedAt >= 4_000 && (await locateRef(page, ref)) && (await page.evaluate(FLAGGED_SCRIPT).catch(() => false))) break;
+        if (Date.now() - clickedAt >= 4_000 && (await locateRef(page, ref))) {
+          if (await page.evaluate(FLAGGED_SCRIPT).catch(() => false)) break;
+          // Or it's asking for an emailed code: the person has to fetch it.
+          if (CODE_REQUEST.test(((await page.evaluate("document.body ? document.body.innerText : ''").catch(() => "")) as string))) break;
+        }
       }
       if (check?.confirmed) {
         const receipt = await this.recordConfirmed(jobId, page, check, "Submitted through ChatGPT");
@@ -564,6 +608,13 @@ export class Harness {
       if (after.elements.some((e) => e.ref === ref) || (await locateRef(page, ref))) {
         const why = after.errors.length ? `the site shows: ${after.errors.slice(0, 5).join("; ")}` : "the form is still showing with no confirmation";
         restore("needs_input", `Not submitted: ${why.slice(0, 200)}`);
+        if (CODE_REQUEST.test(after.text)) {
+          restore("needs_input", "The site sent a verification code: enter it in the Verification code box on this page, then ask ChatGPT to submit again.");
+          return {
+            snapshot: after, submitted: false, state: "needs_input", needs_code: true,
+            note: "The site is asking for a verification code it sent to the user's email or phone. Don't ask for the code in chat: tell the user to enter it in the Verification code box on the application's JobManager page (code_entry_url), then call submit_application again when they say it's in.",
+          };
+        }
         return {
           snapshot: after, submitted: false, state: "needs_input",
           note: `Not submitted: ${why}.${looksEmpty} Fix those fields (see the snapshot's errors and empty required fields) and call submit_application again.`,

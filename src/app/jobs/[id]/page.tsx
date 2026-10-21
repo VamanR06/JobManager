@@ -11,6 +11,7 @@ import ResumePreview from "@/components/ResumePreview";
 import AddEventForm from "@/components/AddEventForm";
 import EventCard from "@/components/EventCard";
 import SubmissionBanner from "@/components/SubmissionBanner";
+import { serverHarness } from "@/lib/apply/harness";
 import { getDb } from "@/lib/db";
 import type { WorkflowState } from "@/lib/workflow-types";
 
@@ -26,6 +27,8 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
     .prepare("SELECT workflow_state, workflow_detail FROM jobs WHERE id = ?")
     .get(id) as { workflow_state: WorkflowState | null; workflow_detail: string | null };
   const posting = getPosting(id);
+  // ChatGPT has this application open in the server's browser (codes can be entered then).
+  const tabOpen = serverHarness().hasTab(id);
   // Only generated resumes can be previewed/revised — uploads have no conversation.
   const linkedResume = job.resume_id ? getDocument(job.resume_id) : null;
   const generatedResume = linkedResume?.generated ? linkedResume : null;
@@ -40,7 +43,9 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
       </Link>
 
       <JobHeader job={job} resumes={listDocuments("resume")} coverLetters={listDocuments("cover_letter")} />
-      {workflow.workflow_state && <SubmissionBanner jobId={id} state={workflow.workflow_state} detail={workflow.workflow_detail} />}
+      {(workflow.workflow_state || tabOpen) && (
+        <SubmissionBanner jobId={id} state={workflow.workflow_state} detail={workflow.workflow_detail} tabOpen={tabOpen} />
+      )}
       <PostingSection jobId={id} posting={posting} hasUrl={!!job.url} />
       {generatedResume && <ResumePreview document={generatedResume} />}
 
