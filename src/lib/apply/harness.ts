@@ -34,6 +34,18 @@ import { accountPassword, createAccount, findAccount } from "./vault";
 
 export class HarnessError extends Error {}
 
+const TAB_CLOSED =
+  "The application's browser tab has closed (it closes after a few idle minutes). Ask ChatGPT to open it again; the site may send a new code.";
+
+/** What the person can do from the job page's Take over panel. Coordinates are CSS pixels in the view. */
+export type TakeOverInput =
+  | { kind: "click"; x: number; y: number }
+  | { kind: "type"; text: string }
+  | { kind: "key"; key: TakeOverKey }
+  | { kind: "scroll"; dy: number; x?: number; y?: number };
+export const TAKE_OVER_KEYS = ["Enter", "Tab", "Shift+Tab", "Backspace", "Escape", "Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"] as const;
+export type TakeOverKey = (typeof TAKE_OVER_KEYS)[number];
+
 /** Labels of verification-code fields ("Security code", "Enter the code we sent", "One-time passcode"…). */
 const CODE_LABEL = /\b(security|verification|confirmation|one[- ]?time|access)\b.*\bcode\b|\bcode\b.*\b(sent|emailed|texted)\b|\b(otp|passcode|pin)\b|^code$|enter (the|your) code/i;
 /** Page text asking for such a code. */
@@ -303,6 +315,62 @@ export class Harness {
     });
   }
 
+  // ---------- take over (the person, from the job page) ----------
+
+  /**
+   * What the tab shows right now, for the job page's Take over panel: a JPEG of
+   * the visible part of the page and its size in CSS pixels (clicks use the same).
+   */
+  view(jobId: number): Promise<{ jpeg: Buffer; width: number; height: number; url: string }> {
+    return this.locked(jobId, async () => {
+      const page = this.browser.existingPage(jobId);
+      if (!page) throw new HarnessError(TAB_CLOSED);
+      const size = page.viewportSize() ?? ((await page.evaluate("({ width: innerWidth, height: innerHeight })")) as { width: number; height: number });
+      return { jpeg: await page.screenshot({ type: "jpeg", quality: 60 }), width: size.width, height: size.height, url: page.url() };
+    });
+  }
+
+  /**
+   * One input from the person taking over: a click at a point on the view,
+   * typed text, a key, or a scroll. The navigation guard still applies. If it
+   * leads to the site's confirmation, that's recorded like any submission.
+   */
+  takeOver(jobId: number, input: TakeOverInput): Promise<{ url: string; note?: string }> {
+    return this.locked(jobId, async () => {
+      let page = this.browser.existingPage(jobId);
+      if (!page) throw new HarnessError(TAB_CLOSED);
+      const popup = input.kind === "click" ? page.context().waitForEvent("page", { timeout: 1_500 }).catch(() => null) : null;
+      switch (input.kind) {
+        case "click":
+          await page.mouse.click(input.x, input.y);
+          break;
+        case "type":
+          await page.keyboard.type(input.text, { delay: 30 });
+          break;
+        case "key":
+          await page.keyboard.press(input.key);
+          break;
+        case "scroll":
+          await page.mouse.move(input.x ?? 640, input.y ?? 450);
+          await page.mouse.wheel(0, input.dy);
+          break;
+      }
+      const opened = popup && (await popup);
+      if (opened && !opened.isClosed()) {
+        this.browser.adopt(jobId, opened, [...this.browser.allowedHosts(page)]);
+        page = opened;
+      }
+      await page.waitForTimeout(300);
+      const check = (await page.evaluate(CONFIRM_SCRIPT).catch(() => null)) as ConfirmationCheck | null;
+      const state = (getDb().prepare("SELECT workflow_state FROM jobs WHERE id = ?").get(jobId) as { workflow_state: string | null } | undefined)?.workflow_state;
+      if (check?.confirmed && state !== "submitted") {
+        await this.recordConfirmed(jobId, page, check, "Submitted by the user through Take over");
+        return { url: page.url(), note: "The site confirmed the submission; it's recorded as submitted." };
+      }
+      return { url: page.url() };
+    });
+  }
+
   /**
    * Types a verification code the person got by email/text into the page
    * (one field, or one box per character). Called from the job page, so the
@@ -311,7 +379,7 @@ export class Harness {
   enterCode(jobId: number, code: string): Promise<ActionResult> {
     return this.locked(jobId, async () => {
       const page = this.browser.existingPage(jobId);
-      if (!page) throw new HarnessError("The application's browser tab has closed (it closes after a few idle minutes). Ask ChatGPT to open it again; the site may send a new code.");
+      if (!page) throw new HarnessError(TAB_CLOSED);
       const snap = await takeSnapshot(page);
       const fields = snap.elements.filter((e) =>
         ["text", "number", "tel", "textbox"].includes(e.kind) && !e.disabled && CODE_LABEL.test(e.label)
@@ -540,7 +608,9 @@ export class Harness {
       }
       let page = this.page(jobId);
       const snap = await takeSnapshot(page);
-      if (snap.blockers.length) throw new HarnessError(`Can't submit: ${snap.blockers.join("; ")}. The user has to deal with that.`);
+      // A challenge or bot check that's showing; a CAPTCHA checkbox may already be ticked, so it doesn't block.
+      const blocking = snap.blockers.filter((b) => !/checkbox/i.test(b));
+      if (blocking.length) throw new HarnessError(`Can't submit: ${blocking.join("; ")}. Ask the user to solve it with Take over on the application's JobManager page, then try again.`);
       // Only a heads-up: portals use custom widgets this can misread, and the site validates anyway.
       const missing = await requiredEmpty(page).catch(() => [] as string[]);
       const target = snap.elements.find((e) => e.ref === ref);
