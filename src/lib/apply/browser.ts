@@ -3,6 +3,7 @@ import path from "path";
 import type { BrowserContext, Frame, Page } from "playwright";
 import { WORK_DIR } from "../db";
 import { assertPublicUrl } from "../netguard";
+import { POLYFILL_SCRIPT } from "./polyfills";
 
 /**
  * The browser for applying (apply/harness.ts): a dedicated Chromium profile
@@ -92,6 +93,8 @@ export class BrowserOwner {
         args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
       }),
     });
+    // Newer JavaScript built-ins for sites that assume them (see polyfills.ts); no-ops on a current browser.
+    await this.ctx.addInitScript(POLYFILL_SCRIPT);
     const pw = installedPlaywright();
     const first = this.ctx.pages()[0] ?? (await this.ctx.newPage());
     const native = (await first.evaluate("typeof Element.prototype.checkVisibility === 'function'").catch(() => true)) as boolean;
