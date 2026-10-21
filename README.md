@@ -149,7 +149,7 @@ once, and closes an application's tab once its submission is confirmed. Tune tho
 | Tool | What it does |
 | --- | --- |
 | `browser_open` | Opens the application page (the ATS form for Greenhouse/Lever/Ashby, else the posting URL) and returns a snapshot |
-| `browser_snapshot` / `browser_screenshot` | The page as a list of elements with refs (labels, values, options, errors, CAPTCHA blockers), or as an image |
+| `browser_snapshot` / `browser_screenshot` | The page as a list of elements with refs (labels, values, options, errors, CAPTCHA blockers), or as an image. Screenshots are also saved (latest 20 per application) and come with a `view_url` link ChatGPT can give you; it opens once you're signed in. A confirmed submit returns a `receipt_url` the same way. Links use the address ChatGPT called; set `JOBMANAGER_PUBLIC_URL=https://jobs.example.com` if they come out wrong |
 | `browser_click` / `browser_type` / `browser_choose` / `browser_navigate` | Act on a ref; each returns a fresh snapshot |
 | `browser_upload` | Attaches the application's linked resume or cover letter, or any document |
 | `browser_autofill` | Fills everything your Profile and saved answers cover, and lists what's left |
