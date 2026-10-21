@@ -12,6 +12,7 @@ import AddEventForm from "@/components/AddEventForm";
 import EventCard from "@/components/EventCard";
 import SubmissionBanner from "@/components/SubmissionBanner";
 import { serverHarness } from "@/lib/apply/harness";
+import TakeOverPanel from "@/components/TakeOverPanel";
 import { getDb } from "@/lib/db";
 import type { WorkflowState } from "@/lib/workflow-types";
 
@@ -46,6 +47,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
       {(workflow.workflow_state || tabOpen) && (
         <SubmissionBanner jobId={id} state={workflow.workflow_state} detail={workflow.workflow_detail} tabOpen={tabOpen} />
       )}
+      {tabOpen && <TakeOverPanel jobId={id} />}
       <PostingSection jobId={id} posting={posting} hasUrl={!!job.url} />
       {generatedResume && <ResumePreview document={generatedResume} />}
 

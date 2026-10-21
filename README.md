@@ -176,8 +176,12 @@ What it guarantees whatever ChatGPT asks:
   application becomes **Submission unknown** and can't be submitted again until you check and press
   **I submitted it** or **It didn't go through** on the job page. ChatGPT is told to get your go-ahead
   before each submit, and ChatGPT itself asks you to confirm the call.
-- **CAPTCHAs and bot checks stop it.** They're reported, never worked around. Many portals block headless browsers;
-  apply to those yourself.
+- **CAPTCHAs are solved by you, never worked around.** When one shows up, ChatGPT sends you to the application's job
+  page. Open **Take over the browser** there: a live picture of the server's browser (refreshed about once a second)
+  where your clicks, scrolling and typing go to the real page. Solve the CAPTCHA, tell ChatGPT, and it carries on. A
+  ticked CAPTCHA checkbox doesn't block submitting; an open challenge does. If you click Submit yourself in Take over,
+  the site's confirmation is recorded the same way. Invisible bot checks ("flagged as spam" with nothing to click)
+  can't be solved this way: apply to those sites in your own browser.
 
 Setup, on the server:
 

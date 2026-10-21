@@ -359,3 +359,73 @@ test("stand-ins for newer JavaScript match the real built-ins, and leave real on
     enumerable: 0,
   });
 });
+
+test("take over: the person sees the page and their clicks and typing reach it", async () => {
+  const id = newApplication("portal-apply.html");
+  await harness.open(id);
+  const page = browser.existingPage(id)!;
+
+  const v = await harness.view(id);
+  assert.deepEqual([v.width, v.height], [1280, 900]);
+  assert.equal(v.jpeg.subarray(0, 2).toString("hex"), "ffd8", "a JPEG");
+
+  // Click the field where it shows on the picture, then type.
+  const box = (await page.locator("#first").boundingBox())!;
+  await harness.takeOver(id, { kind: "click", x: box.x + box.width / 2, y: box.y + box.height / 2 });
+  await harness.takeOver(id, { kind: "type", text: "Test" });
+  assert.equal(await page.locator("#first").inputValue(), "Test");
+  await harness.takeOver(id, { kind: "key", key: "Tab" });
+  assert.equal(await page.evaluate("document.activeElement.id"), "em");
+  await harness.takeOver(id, { kind: "type", text: "t@example.com" });
+  await harness.takeOver(id, { kind: "scroll", dy: 200 });
+
+  // Finishing the form and clicking Submit through Take over is recorded like any submission.
+  await page.locator("#src").selectOption("Friend");
+  await page.locator("#cv").setInputFiles({ name: "r.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4") });
+  const submit = (await page.getByRole("button", { name: "Submit Application" }).boundingBox())!;
+  let out = await harness.takeOver(id, { kind: "click", x: submit.x + 5, y: submit.y + 5 });
+  // The site confirms a moment later; the next input notices it if the click itself didn't.
+  for (let i = 0; i < 10 && !out.note; i++) out = await harness.takeOver(id, { kind: "scroll", dy: 0 });
+  assert.match(out.note ?? "", /recorded as submitted/);
+  assert.equal((getDb().prepare("SELECT workflow_state FROM jobs WHERE id = ?").get(id) as { workflow_state: string }).workflow_state, "submitted");
+  assert.equal(listEvents(id)[0].status, "applied");
+});
+
+test("a ticked CAPTCHA checkbox doesn't block submitting; an open challenge does", async () => {
+  await withFlags({ JOBMANAGER_MCP_BROWSER: "1", JOBMANAGER_MCP_SUBMIT: "1" }, async () => {
+    const id = newApplication("portal-apply.html");
+    await call("browser_open", { application_id: id });
+    const page = browser.existingPage(id)!;
+    await page.locator("#first").fill("Test");
+    await page.locator("#em").fill("t@example.com");
+    await page.locator("#src").selectOption("Friend");
+    await page.locator("#cv").setInputFiles({ name: "r.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4") });
+    const frame = (name: string) => page.evaluate(`(() => { const f = document.createElement("iframe"); f.src = "/recaptcha/api2/${name}"; f.width = 300; f.height = 80; document.body.prepend(f); return true; })()`);
+
+    await frame("bframe");
+    let r = await call("browser_snapshot", { application_id: id });
+    const submit = el(r.data.snapshot, /Submit Application/).ref;
+    assert.match((await call("submit_application", { application_id: id, ref: submit })).error!, /CAPTCHA challenge is showing.*Take over/);
+
+    await page.evaluate(`document.querySelector("iframe[src*=bframe]").remove()`);
+    await frame("anchor");
+    r = await call("browser_snapshot", { application_id: id });
+    assert.ok(r.data.snapshot.blockers.some((b: string) => /checkbox/.test(b)));
+    r = await call("submit_application", { application_id: id, ref: submit });
+    assert.equal(r.error, null, r.error ?? "");
+    assert.equal(r.data.submitted, true);
+  });
+});
+
+test("the take-over route only accepts known inputs", async () => {
+  const { GET, POST } = await import("../src/app/api/jobs/[id]/takeover/route");
+  const id = newApplication("portal-apply.html");
+  const ctx = { params: Promise.resolve({ id: String(id) }) };
+  const post = (body: unknown) => POST(new NextRequest(`http://localhost/api/jobs/${id}/takeover`, { method: "POST", body: JSON.stringify(body) }), ctx);
+  assert.equal((await post({ kind: "key", key: "Meta+Q" })).status, 400);
+  assert.equal((await post({ kind: "click", x: -1, y: 5 })).status, 400);
+  assert.equal((await post({ kind: "eval", code: "1" })).status, 400);
+  const noTab = await GET(new NextRequest(`http://localhost/api/jobs/${id}/takeover`), ctx);
+  assert.equal(noTab.status, 409);
+  assert.match((await noTab.json()).error, /tab has closed/);
+});
