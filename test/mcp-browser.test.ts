@@ -146,10 +146,15 @@ test("sign up, fill, upload and submit an application end to end", async () => {
     assert.equal(r.error, null, r.error ?? "");
     assert.equal(el(r.data.snapshot, /hear about/).value, "Career fair");
 
-    // Required fields are checked before anything is sent.
+    // The site decides what's required: it rejects the submit (here the browser's own validation),
+    // the form stays, and ChatGPT is told what to fix and may try again.
     r = await call("submit_application", { application_id: id, ref: submit.ref });
-    assert.match(r.error!, /Required fields are still empty: Email, Resume/);
+    assert.equal(r.error, null, r.error ?? "");
+    assert.equal(r.data.submitted, false);
+    assert.equal(r.data.state, "needs_input");
+    assert.match(r.data.note, /Not submitted: .*looked empty: Email, Resume/);
     assert.equal(posts, 0);
+    assert.equal((getDb().prepare("SELECT workflow_state FROM jobs WHERE id = ?").get(id) as { workflow_state: string }).workflow_state, "needs_input");
 
     r = await call("browser_type", { application_id: id, ref: el(r.data?.snapshot ?? snap, /^Email$/).ref, text: "test.candidate@example.com" });
     r = await call("browser_upload", { application_id: id, ref: el(r.data.snapshot, /Resume/).ref });
@@ -178,8 +183,8 @@ test("sign up, fill, upload and submit an application end to end", async () => {
     assert.equal(job.workflow_state, "submitted");
     assert.equal(listEvents(id)[0].status, "applied");
     const payloads = fs.readdirSync(path.join(DATA_DIR, "artifacts", `job-${id}`)).filter((f) => f.startsWith("submission-"));
-    assert.equal(payloads.length, 1, "what was sent is saved");
-    const payload = fs.readFileSync(path.join(DATA_DIR, "artifacts", `job-${id}`, payloads[0]), "utf8");
+    assert.equal(payloads.length, 2, "what was sent is saved, for the rejected attempt and the one that went through");
+    const payload = fs.readFileSync(path.join(DATA_DIR, "artifacts", `job-${id}`, payloads.sort()[1]), "utf8");
     assert.match(payload, /Career fair/);
     assert.ok(!payload.includes(password));
 

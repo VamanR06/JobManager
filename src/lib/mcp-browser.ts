@@ -136,7 +136,7 @@ export const SUBMIT_TOOL = {
   name: "submit_application",
   title: "Submit the application",
   description:
-    "Clicks the form's final submit button (ref) after checking that no required field is empty and no CAPTCHA is showing, and saves exactly what's being sent. Only after the user has confirmed this specific application and its answers. It counts as submitted only if the site shows its confirmation; otherwise the state is submission_unknown and it can't be submitted again until the user checks. On success the application gets an Applied status.",
+    "Clicks the form's final submit button (ref) and saves exactly what's being sent. Refused while a CAPTCHA is showing. Only after the user has confirmed this specific application and its answers. It counts as submitted only if the site shows its confirmation (the application then gets an Applied status). If the site rejects it and the form is still showing, state is needs_input: the note lists the site's errors and fields that looked empty; fix them and call this again. If the form disappeared with no confirmation, state is submission_unknown: never retry; ask the user to check.",
   inputSchema: {
     type: "object",
     properties: { ...APP, ref: { type: "string", description: "The submit button's ref." } },

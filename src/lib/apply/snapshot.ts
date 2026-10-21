@@ -209,6 +209,12 @@ export const REQUIRED_EMPTY_SCRIPT = String.raw`(() => {
   return missing;
 })()`;
 
+/** Whether the page shows a field flagged invalid or an alert (a rejected submit). Runs in the page. */
+export const FLAGGED_SCRIPT = String.raw`(() => {
+  const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  return Array.from(document.querySelectorAll("[aria-invalid=true], input:invalid, select:invalid, textarea:invalid, [role=alert]")).some(shown);
+})()`;
+
 /** Frame ids live on the Frame objects, so refs stay valid until the frame goes away. */
 const frameIds = new WeakMap<Frame, string>();
 let frameSeq = 0;

@@ -10,7 +10,7 @@ import { BrowserOwner, hostAllowed, PROFILE_DIR } from "./browser";
 import { CONFIRM_SCRIPT, type ConfirmationCheck } from "./confirm";
 import { applicationTarget, prepareApplication, SUPPORTED_ATS, type Ats } from "./fill";
 import { COMBO_OPTIONS_SCRIPT } from "./scan";
-import { locateRef, requiredEmpty, SUBMIT_TEXT, takeSnapshot, type PageSnapshot } from "./snapshot";
+import { FLAGGED_SCRIPT, locateRef, requiredEmpty, SUBMIT_TEXT, takeSnapshot, type PageSnapshot } from "./snapshot";
 import { accountPassword, createAccount, findAccount } from "./vault";
 
 /**
@@ -501,8 +501,8 @@ export class Harness {
       let page = this.page(jobId);
       const snap = await takeSnapshot(page);
       if (snap.blockers.length) throw new HarnessError(`Can't submit: ${snap.blockers.join("; ")}. The user has to deal with that.`);
-      const missing = await requiredEmpty(page);
-      if (missing.length) throw new HarnessError(`Required fields are still empty: ${missing.join(", ")}.`);
+      // Only a heads-up: portals use custom widgets this can misread, and the site validates anyway.
+      const missing = await requiredEmpty(page).catch(() => [] as string[]);
       const target = snap.elements.find((e) => e.ref === ref);
       if (!target) throw new HarnessError(`No element ${ref} on the page now; take a new snapshot.`);
       if (target.kind !== "button" && target.kind !== "link") throw new HarnessError(`${ref} is a ${target.kind}, not a button.`);
@@ -540,11 +540,13 @@ export class Harness {
       if (opened) page = opened;
 
       let check: ConfirmationCheck | null = null;
-      const deadline = Date.now() + 30_000;
-      while (Date.now() < deadline) {
+      const clickedAt = Date.now();
+      while (Date.now() - clickedAt < 30_000) {
         await page.waitForTimeout(1_000);
         check = (await page.evaluate(CONFIRM_SCRIPT).catch(() => null)) as ConfirmationCheck | null;
         if (check?.confirmed || check?.warning) break;
+        // The site rejected it outright: the button is still there and fields are flagged. No need to wait it out.
+        if (Date.now() - clickedAt >= 4_000 && (await locateRef(page, ref)) && (await page.evaluate(FLAGGED_SCRIPT).catch(() => false))) break;
       }
       if (check?.confirmed) {
         const receipt = await this.recordConfirmed(jobId, page, check, "Submitted through ChatGPT");
@@ -553,11 +555,19 @@ export class Harness {
         return { ...done, submitted: true, state: "submitted", ...(receipt && { receipt_file: path.basename(receipt) }), note: `Submitted; the site confirmed it ("${check.snippet}"). Receipt screenshot saved${receipt ? "" : " failed"}; the tab is closed.` };
       }
       const after = await takeSnapshot(page);
-      const formStillThere = after.elements.some((e) => e.ref === ref) || (await requiredEmpty(page).catch(() => [])).length > 0 || after.errors.length > 0;
-      if (check?.warning || (formStillThere && after.errors.length)) {
-        const why = check?.warning ?? after.errors.slice(0, 3).join("; ");
-        restore("needs_input", `The site didn't accept the submission: "${why.slice(0, 160)}"`);
-        return { snapshot: after, submitted: false, state: "needs_input", note: `Not submitted: the site says "${why}". Fix it and try again.` };
+      const looksEmpty = missing.length ? ` Before submitting, these looked empty: ${missing.join(", ")}.` : "";
+      if (check?.warning) {
+        restore("needs_input", `The site flagged the submission: "${check.warning.slice(0, 160)}"`);
+        return { snapshot: after, submitted: false, state: "needs_input", note: `Not submitted: the site says "${check.warning}". Tell the user; retrying may not help.` };
+      }
+      // The submit button is still on the page and there's no confirmation: the site didn't take it.
+      if (after.elements.some((e) => e.ref === ref) || (await locateRef(page, ref))) {
+        const why = after.errors.length ? `the site shows: ${after.errors.slice(0, 5).join("; ")}` : "the form is still showing with no confirmation";
+        restore("needs_input", `Not submitted: ${why.slice(0, 200)}`);
+        return {
+          snapshot: after, submitted: false, state: "needs_input",
+          note: `Not submitted: ${why}.${looksEmpty} Fix those fields (see the snapshot's errors and empty required fields) and call submit_application again.`,
+        };
       }
       restore("submission_unknown", "Clicked submit through ChatGPT but the site showed no confirmation. Check the portal or your email before doing anything else.");
       return {
