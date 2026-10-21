@@ -215,10 +215,21 @@ export class Harness {
     return this.locked(jobId, async () => this.withSnapshot(this.page(jobId)));
   }
 
-  screenshot(jobId: number): Promise<{ png: Buffer; url: string }> {
+  /**
+   * Screenshots the tab and saves it in data/artifacts/job-<id>/ (the latest
+   * 20 are kept), so the person can open it from a link.
+   */
+  screenshot(jobId: number): Promise<{ png: Buffer; url: string; file: string }> {
     return this.locked(jobId, async () => {
       const page = this.page(jobId);
-      return { png: await page.screenshot({ type: "png" }), url: page.url() };
+      const png = await page.screenshot({ type: "png" });
+      const dir = path.join(ARTIFACTS_DIR, `job-${jobId}`);
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const file = `screenshot-${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
+      fs.writeFileSync(path.join(dir, file), png, { mode: 0o600 });
+      const old = fs.readdirSync(dir).filter((f) => /^screenshot-.*\.png$/.test(f)).sort().slice(0, -20);
+      for (const f of old) fs.rmSync(path.join(dir, f), { force: true });
+      return { png, url: page.url(), file };
     });
   }
 
@@ -539,7 +550,7 @@ export class Harness {
         const receipt = await this.recordConfirmed(jobId, page, check, "Submitted through ChatGPT");
         const done = await this.withSnapshot(page);
         await page.close().catch(() => {}); // nothing left to do there; frees the memory
-        return { ...done, submitted: true, state: "submitted", note: `Submitted; the site confirmed it ("${check.snippet}"). Receipt screenshot saved${receipt ? "" : " failed"}; the tab is closed.` };
+        return { ...done, submitted: true, state: "submitted", ...(receipt && { receipt_file: path.basename(receipt) }), note: `Submitted; the site confirmed it ("${check.snippet}"). Receipt screenshot saved${receipt ? "" : " failed"}; the tab is closed.` };
       }
       const after = await takeSnapshot(page);
       const formStillThere = after.elements.some((e) => e.ref === ref) || (await requiredEmpty(page).catch(() => [])).length > 0 || after.errors.length > 0;

@@ -12,6 +12,7 @@ import { BrowserOwner, hostAllowed } from "../src/lib/apply/browser";
 import { Harness } from "../src/lib/apply/harness";
 import { accountPassword } from "../src/lib/apply/vault";
 import { handleMcpMessage } from "../src/lib/mcp";
+import { NextRequest } from "next/server";
 import { createDocument, createJob, listEvents, updateJob } from "../src/lib/queries";
 
 process.env.JOBMANAGER_VAULT_KEY = Buffer.alloc(32, 7).toString("base64");
@@ -157,10 +158,21 @@ test("sign up, fill, upload and submit an application end to end", async () => {
 
     const shot = await call("browser_screenshot", { application_id: id });
     assert.equal(shot.raw.content[0].type, "image");
+    // A link the person can open: the PNG is saved and served behind the sign-in.
+    const link = /^\/api\/jobs\/(\d+)\/screenshots\/(screenshot-[\w-]+\.png)$/.exec(shot.data.view_url)!;
+    assert.ok(link, shot.data.view_url);
+    const { GET: shotGet } = await import("../src/app/api/jobs/[id]/screenshots/[name]/route");
+    const served = await shotGet(new NextRequest(`http://localhost${shot.data.view_url}`), { params: Promise.resolve({ id: link[1], name: link[2] }) });
+    assert.equal(served.status, 200);
+    assert.equal(served.headers.get("content-type"), "image/png");
+    assert.equal((await served.arrayBuffer()).byteLength > 1000, true);
+    const sneaky = await shotGet(new NextRequest("http://localhost/x"), { params: Promise.resolve({ id: link[1], name: "../../app.db" }) });
+    assert.equal(sneaky.status, 404);
 
     r = await call("submit_application", { application_id: id, ref: submit.ref });
     assert.equal(r.error, null, r.error ?? "");
     assert.equal(r.data.submitted, true);
+    assert.match(r.data.receipt_url, /^\/api\/jobs\/\d+\/screenshots\/receipt-[\w-]+\.png$/);
     assert.equal(posts, 1);
     const job = getDb().prepare("SELECT workflow_state FROM jobs WHERE id = ?").get(id) as { workflow_state: string };
     assert.equal(job.workflow_state, "submitted");

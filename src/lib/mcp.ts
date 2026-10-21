@@ -211,6 +211,8 @@ function toolError(text: string) {
 export interface McpDeps {
   download?: FileDownloader;
   harness?: Harness;
+  /** This app's public address, for links in results (e.g. "https://jobs.example.com"). */
+  baseUrl?: string | null;
 }
 
 async function callTool(name: unknown, args: Record<string, unknown>, deps: McpDeps) {
@@ -249,7 +251,7 @@ async function runTool(name: unknown, args: Record<string, unknown>, deps: McpDe
     }
   }
   if (isBrowserTool(name)) {
-    const out = await runBrowserTool(name as string, args, deps.harness);
+    const out = await runBrowserTool(name as string, args, deps.harness, deps.baseUrl ?? null);
     if (out.kind === "image") {
       return {
         content: [{ type: "image", data: out.png.toString("base64"), mimeType: "image/png" }, { type: "text", text: JSON.stringify(out.data) }],

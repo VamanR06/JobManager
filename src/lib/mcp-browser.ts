@@ -46,7 +46,8 @@ export const BROWSER_TOOLS = [
   {
     name: "browser_screenshot",
     title: "Screenshot the page",
-    description: "A screenshot of the application's tab, for when the snapshot isn't enough (layout, images, odd widgets) or to show the user.",
+    description:
+      "A screenshot of the application's tab, for when the snapshot isn't enough (layout, images, odd widgets) or to show the user. You see the image; to show it to the user, give them view_url as a link (it opens in their browser once they're signed in to JobManager).",
     inputSchema: { type: "object", properties: { ...APP }, required: ["application_id"], additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
   },
@@ -180,11 +181,13 @@ function argSummary(args: Record<string, unknown>): string {
  * page URL, Chromium version and CHROMIUM_PATH. The model gets the URL and
  * browser version too, so it can pass them on.
  */
-export async function runBrowserTool(name: string, args: Record<string, unknown>, harness: Harness = serverHarness()): Promise<BrowserToolResult> {
+export async function runBrowserTool(
+  name: string, args: Record<string, unknown>, harness: Harness = serverHarness(), baseUrl: string | null = null
+): Promise<BrowserToolResult> {
   const started = Date.now();
   const tag = `[browser] app ${String(args.application_id)} ${name} ${argSummary(args)}`.trim();
   try {
-    const out = await dispatchBrowserTool(name, args, harness);
+    const out = await dispatchBrowserTool(name, args, harness, baseUrl);
     const url = typeof (out.data as { snapshot?: { url?: string } }).snapshot?.url === "string" ? (out.data as { snapshot: { url: string } }).snapshot.url : (out.data.url as string | undefined);
     console.log(`${tag} → ok ${Date.now() - started}ms${url ? ` ${url}` : ""}`);
     return out;
@@ -225,7 +228,12 @@ function playwrightVersion(): string {
   return pwVersion;
 }
 
-async function dispatchBrowserTool(name: string, args: Record<string, unknown>, harness: Harness): Promise<BrowserToolResult> {
+/** Link to a saved screenshot/receipt (the page that serves it needs the person's sign-in). */
+function fileLink(baseUrl: string | null, jobId: number, file: string): string {
+  return `${baseUrl ?? ""}/api/jobs/${jobId}/screenshots/${encodeURIComponent(file)}`;
+}
+
+async function dispatchBrowserTool(name: string, args: Record<string, unknown>, harness: Harness, baseUrl: string | null): Promise<BrowserToolResult> {
   if (!mcpBrowserEnabled()) throw new ToolInputError("Browser tools are off on this server (JOBMANAGER_MCP_BROWSER is not set).");
   if (name === SUBMIT_TOOL.name && !mcpSubmitEnabled()) {
     throw new ToolInputError("Submitting is off on this server (JOBMANAGER_MCP_SUBMIT is not set). Tell the user the form is filled and ready for them to submit.");
@@ -240,7 +248,11 @@ async function dispatchBrowserTool(name: string, args: Record<string, unknown>, 
         return json(await harness.snapshot(id));
       case "browser_screenshot": {
         const shot = await harness.screenshot(id);
-        return { kind: "image", data: { url: shot.url }, png: shot.png };
+        return {
+          kind: "image",
+          data: { url: shot.url, view_url: fileLink(baseUrl, id, shot.file), note: "Give the user view_url as a link to see this screenshot." },
+          png: shot.png,
+        };
       }
       case "browser_navigate":
         return json(await harness.navigate(id, str(args.url, "url")));
@@ -270,8 +282,10 @@ async function dispatchBrowserTool(name: string, args: Record<string, unknown>, 
           replace: args.replace === true,
         }));
       }
-      case "submit_application":
-        return json(await harness.submit(id, str(args.ref, "ref")));
+      case "submit_application": {
+        const { receipt_file, ...done } = await harness.submit(id, str(args.ref, "ref")) as Awaited<ReturnType<Harness["submit"]>> & { receipt_file?: string };
+        return json(receipt_file ? { ...done, receipt_url: fileLink(baseUrl, id, receipt_file) } : done);
+      }
     }
   } catch (err) {
     if (err instanceof HarnessError || err instanceof VaultError) throw new ToolInputError(err.message);

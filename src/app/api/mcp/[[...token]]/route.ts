@@ -19,8 +19,20 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }, { status: 400 });
   }
-  const reply = await handleMcpMessage(body);
+  const reply = await handleMcpMessage(body, { baseUrl: publicBaseUrl(req) });
   return reply ? NextResponse.json(reply) : new NextResponse(null, { status: 202 });
+}
+
+/**
+ * The address people reach this app at, for links in tool results:
+ * JOBMANAGER_PUBLIC_URL if set, else what the reverse proxy reports.
+ */
+function publicBaseUrl(req: NextRequest): string {
+  const set = process.env.JOBMANAGER_PUBLIC_URL?.trim().replace(/\/+$/, "");
+  if (set) return set;
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? req.nextUrl.host;
+  const proto = req.headers.get("x-forwarded-proto")?.split(",")[0].trim() ?? req.nextUrl.protocol.replace(/:$/, "");
+  return `${proto}://${host}`;
 }
 
 /** No server-initiated stream and no sessions to end. */
