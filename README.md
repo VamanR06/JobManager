@@ -166,11 +166,13 @@ What it guarantees whatever ChatGPT asks:
   key, account creation is refused rather than storing anything in plain text. Verification codes sent by email or
   text are yours to give ChatGPT; it doesn't read your email.
 - **Submitting is its own step.** `browser_click` refuses any button whose label says it submits the application.
-  `submit_application` refuses while a required field is empty or a CAPTCHA is showing. It saves exactly what's
-  being sent (`data/artifacts/job-<id>/submission-*.json`) before clicking, and counts the application as submitted
-  only when the site shows its confirmation. That adds an **Applied** status and a receipt screenshot. If the site
-  shows no confirmation, the application becomes **Submission unknown** and can't be submitted again until you
-  check and press **I submitted it** or **It didn't go through** on the job page. ChatGPT is told to get your go-ahead
+  `submit_application` refuses while a CAPTCHA is showing. It saves exactly what's being sent
+  (`data/artifacts/job-<id>/submission-*.json`) before clicking, and counts the application as submitted only when
+  the site shows its confirmation. That adds an **Applied** status and a receipt screenshot. The site decides what's
+  required: if it rejects the submit and the form is still showing, ChatGPT gets the site's errors (plus any
+  required fields that looked empty) and can fix them and retry. If the form disappears with no confirmation, the
+  application becomes **Submission unknown** and can't be submitted again until you check and press
+  **I submitted it** or **It didn't go through** on the job page. ChatGPT is told to get your go-ahead
   before each submit, and ChatGPT itself asks you to confirm the call.
 - **CAPTCHAs and bot checks stop it.** They're reported, never worked around. Many portals block headless browsers;
   apply to those yourself.

@@ -99,6 +99,14 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
     return h ? clean(h.textContent) : "";
   };
 
+  // A dropdown's chosen value lives beside its search box (react-select: "single-value"), not in the input.
+  // Look in the control box: the input's own wrapper ("select__input-container") never holds it.
+  const comboChosen = (el) => {
+    const box = el.closest(".select__control") || el.closest("[class*='control']") || el.closest(".select__container") || el.closest("[class*='container']") || el.parentElement;
+    const chosen = box ? Array.from(box.querySelectorAll("[class*='single-value'], [class*='singleValue'], [class*='multi-value__label'], [class*='multiValue'] [class*='label']")).map((v) => clean(v.textContent)).filter(Boolean) : [];
+    return chosen.length ? chosen.join("; ") : clean(el.value || "");
+  };
+
   const sel = "input, textarea, select, button, a[href], [role=button], [role=link], [role=checkbox], [role=radio], [role=combobox], [role=option], [role=tab], [role=menuitem], [role=switch], [contenteditable=true]";
   const out = [];
   let total = 0;
@@ -138,9 +146,7 @@ export const SNAPSHOT_SCRIPT = String.raw`(() => {
       }
       if (SUBMIT.test(e.label)) e.submits_application = true;
     } else if (kind === "combobox") {
-      const box = el.closest("[class*='control'], [class*='container']") || el.parentElement;
-      const chosen = box ? Array.from(box.querySelectorAll("[class*='single-value'], [class*='singleValue'], [class*='multi-value__label']")).map((v) => clean(v.textContent)).filter(Boolean) : [];
-      e.value = cut(chosen.length ? chosen.join("; ") : clean(el.value || ""), 200);
+      e.value = cut(comboChosen(el), 200);
     } else if ("value" in el) e.value = cut(String(el.value || ""), 300);
     else if (el.getAttribute("contenteditable") === "true") e.value = cut(ownText(el), 300);
     out.push(e);
@@ -177,6 +183,12 @@ export const REQUIRED_EMPTY_SCRIPT = String.raw`(() => {
     const w = el.closest("label"); if (w) return clean(w.textContent);
     return clean(el.getAttribute("placeholder") || el.name || "field");
   };
+  // Same as the snapshot's: a dropdown's choice is shown beside its (empty) search box.
+  const comboChosen = (el) => {
+    const box = el.closest(".select__control") || el.closest("[class*='control']") || el.closest(".select__container") || el.closest("[class*='container']") || el.parentElement;
+    const chosen = box ? Array.from(box.querySelectorAll("[class*='single-value'], [class*='singleValue'], [class*='multi-value__label'], [class*='multiValue'] [class*='label']")).map((v) => clean(v.textContent)).filter(Boolean) : [];
+    return chosen.length ? chosen.join("; ") : clean(el.value || "");
+  };
   const missing = [];
   const seen = new Set();
   for (const el of document.querySelectorAll("input, textarea, select")) {
@@ -190,10 +202,17 @@ export const REQUIRED_EMPTY_SCRIPT = String.raw`(() => {
       empty = !document.querySelector("input[type=radio][name=" + q(el.name) + "]:checked");
     } else if (el.type === "checkbox") empty = !el.checked;
     else if (el.type === "file") empty = !(el.files && el.files.length);
+    else if (el.getAttribute("role") === "combobox") empty = !comboChosen(el);
     else empty = !clean(el.value);
     if (empty) missing.push(labelOf(el).slice(0, 120));
   }
   return missing;
+})()`;
+
+/** Whether the page shows a field flagged invalid or an alert (a rejected submit). Runs in the page. */
+export const FLAGGED_SCRIPT = String.raw`(() => {
+  const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  return Array.from(document.querySelectorAll("[aria-invalid=true], input:invalid, select:invalid, textarea:invalid, [role=alert]")).some(shown);
 })()`;
 
 /** Frame ids live on the Frame objects, so refs stay valid until the frame goes away. */
