@@ -41,6 +41,34 @@ export interface BrowserOptions {
   allowLocal?: boolean;
 }
 
+/**
+ * Runs in every page and frame before the site's scripts. Element.checkVisibility
+ * arrived in Chrome 105; Playwright uses it when Element.prototype has it, so a
+ * page that half-defines it (e.g. a site polyfill in one frame only) on an older
+ * Chromium makes Playwright fail with "element.checkVisibility is not a function".
+ * Defining it everywhere up front keeps old Chromium (the server's 93) working.
+ */
+export const COMPAT_SCRIPT = String.raw`(() => {
+  if (typeof Element === "undefined" || typeof Element.prototype.checkVisibility === "function") return;
+  Object.defineProperty(Element.prototype, "checkVisibility", {
+    configurable: true, writable: true,
+    value: function checkVisibility(o) {
+      o = o || {};
+      if (!this.isConnected) return false;
+      for (let el = this; el; ) {
+        const st = getComputedStyle(el);
+        if (st.display === "none") return false;
+        if (el !== this && st.contentVisibility === "hidden") return false;
+        if ((o.checkOpacity || o.opacityProperty) && st.opacity === "0") return false;
+        const root = el.getRootNode && el.getRootNode();
+        el = el.parentElement || (root && root.host) || null;
+      }
+      if ((o.checkVisibilityCSS || o.visibilityProperty) && getComputedStyle(this).visibility !== "visible") return false;
+      return true;
+    },
+  });
+})()`;
+
 export const PROFILE_DIR = path.join(path.dirname(WORK_DIR), "browser-profile");
 
 export class BrowserOwner {
@@ -70,6 +98,10 @@ export class BrowserOwner {
         args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
       }),
     });
+    await this.ctx.addInitScript(COMPAT_SCRIPT);
+    // Pages already open (a persistent context starts with one) get it now too.
+    for (const p of this.ctx.pages()) await p.evaluate(COMPAT_SCRIPT).catch(() => {});
+    console.log(`[browser] launched ${system ? `CHROMIUM_PATH=${system}` : "Playwright's Chromium"}, ${headless ? "headless" : "windowed"}, profile ${dir}`);
     this.ctx.on("close", () => {
       this.ctx = null;
       this.pages.clear();

@@ -166,8 +166,66 @@ export type BrowserToolResult =
   | { kind: "json"; data: Record<string, unknown> }
   | { kind: "image"; data: Record<string, unknown>; png: Buffer };
 
-/** Runs a browser tool. Throws ToolInputError for anything to report back to the model. */
+/** Arguments as they appear in the log: refs, urls and modes; typed text only by length (it's personal data). */
+function argSummary(args: Record<string, unknown>): string {
+  return Object.entries(args)
+    .filter(([k]) => k !== "application_id")
+    .map(([k, v]) => (k === "text" || k === "option" ? `${k}=(${String(v ?? "").length} chars)` : `${k}=${JSON.stringify(v)}`))
+    .join(" ");
+}
+
+/**
+ * Runs a browser tool and logs it to the server's output: one line per call
+ * with its outcome and time, and on a browser failure the full error, stack,
+ * page URL, Chromium version and CHROMIUM_PATH. The model gets the URL and
+ * browser version too, so it can pass them on.
+ */
 export async function runBrowserTool(name: string, args: Record<string, unknown>, harness: Harness = serverHarness()): Promise<BrowserToolResult> {
+  const started = Date.now();
+  const tag = `[browser] app ${String(args.application_id)} ${name} ${argSummary(args)}`.trim();
+  try {
+    const out = await dispatchBrowserTool(name, args, harness);
+    const url = typeof (out.data as { snapshot?: { url?: string } }).snapshot?.url === "string" ? (out.data as { snapshot: { url: string } }).snapshot.url : (out.data.url as string | undefined);
+    console.log(`${tag} → ok ${Date.now() - started}ms${url ? ` ${url}` : ""}`);
+    return out;
+  } catch (err) {
+    const ms = Date.now() - started;
+    if (err instanceof BrowserFailure) {
+      const where = Number.isInteger(args.application_id) ? await harness.debugInfo(args.application_id as number) : { url: null, browser: null };
+      console.error(
+        `${tag} → BROWSER ERROR after ${ms}ms\n` +
+          `  page: ${where.url ?? "(no tab)"}\n` +
+          `  browser: ${where.browser ?? "unknown"}; CHROMIUM_PATH=${process.env.CHROMIUM_PATH ?? "(unset)"}; playwright ${playwrightVersion()}\n` +
+          `  ${err.cause instanceof Error ? (err.cause.stack ?? err.cause.message).replace(/\n/g, "\n  ") : String(err.cause)}`
+      );
+      const context = [where.url && `page ${where.url}`, where.browser].filter(Boolean).join(", ");
+      throw new ToolInputError(`Browser error in ${name}: ${err.message}${context ? ` (${context})` : ""}. Take a new snapshot and try again; if it keeps happening, tell the user this exact message.`);
+    }
+    console.log(`${tag} → refused ${ms}ms: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`);
+    throw err;
+  }
+}
+
+/** A Playwright/browser failure (not a refusal), carrying the original error. */
+class BrowserFailure extends Error {
+  constructor(message: string, readonly cause: unknown) {
+    super(message);
+  }
+}
+
+let pwVersion: string | null = null;
+function playwrightVersion(): string {
+  if (pwVersion) return pwVersion;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    pwVersion = (require("playwright-core/package.json") as { version: string }).version;
+  } catch {
+    pwVersion = "unknown";
+  }
+  return pwVersion;
+}
+
+async function dispatchBrowserTool(name: string, args: Record<string, unknown>, harness: Harness): Promise<BrowserToolResult> {
   if (!mcpBrowserEnabled()) throw new ToolInputError("Browser tools are off on this server (JOBMANAGER_MCP_BROWSER is not set).");
   if (name === SUBMIT_TOOL.name && !mcpSubmitEnabled()) {
     throw new ToolInputError("Submitting is off on this server (JOBMANAGER_MCP_SUBMIT is not set). Tell the user the form is filled and ready for them to submit.");
@@ -218,9 +276,9 @@ export async function runBrowserTool(name: string, args: Record<string, unknown>
   } catch (err) {
     if (err instanceof HarnessError || err instanceof VaultError) throw new ToolInputError(err.message);
     if (err instanceof ToolInputError) throw err;
-    // Playwright errors (timeouts, detached elements) are the model's to recover from.
+    // Playwright errors (timeouts, detached elements, old-browser gaps): logged in full by runBrowserTool.
     const msg = err instanceof Error ? err.message.split("\n")[0] : String(err);
-    throw new ToolInputError(`Browser error: ${msg.slice(0, 300)}. Take a new snapshot and try again.`);
+    throw new BrowserFailure(msg.slice(0, 300), err);
   }
   throw new ToolInputError(`Unknown tool: ${name}`);
 }

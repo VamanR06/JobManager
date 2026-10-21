@@ -187,6 +187,11 @@ Setup, on the server:
    - Playwright's own: `npx playwright install chromium` (add `--with-deps` if it reports missing libraries).
 4. `npm run db:migrate`, then restart the app.
 
+Every browser tool call is logged to the server's output (wherever `next start`'s output goes): one line each with
+the tool, element ref, outcome and time; typed text is logged only by its length. A browser failure also logs the
+page URL, Chromium version, `CHROMIUM_PATH`, Playwright version and the full error with Playwright's call log, and
+ChatGPT's error message includes the page and browser version so it can pass them on.
+
 Then: "Apply to my Acme application with JobManager. Make an account if it needs one, and show me the answers
 before submitting."
 
