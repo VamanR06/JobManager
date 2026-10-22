@@ -5,6 +5,18 @@ import { useRouter } from "next/navigation";
 import { STATUSES, statusName, type AppDocument, type DocumentKind, type Status } from "@/lib/types";
 import { documentLabel, fromDatetimeLocal, toDatetimeLocal } from "@/lib/format";
 
+interface JobRef {
+  id: number;
+  company: string;
+  title: string;
+  url: string | null;
+}
+interface Duplicates {
+  error: string;
+  same_posting: JobRef | null;
+  similar: JobRef[];
+}
+
 interface ParsedPosting {
   title: string | null;
   company: string | null;
@@ -49,6 +61,9 @@ export default function AddJobForm({ resumes: allResumes, coverLetters: allCover
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set when saving found this job already tracked; the next save adds it anyway.
+  const [dupes, setDupes] = useState<Duplicates | null>(null);
+  useEffect(() => setDupes(null), [url, company, title]);
   const [notice, setNotice] = useState<string | null>(null);
   const resumeFileRef = useRef<HTMLInputElement>(null);
   const coverLetterFileRef = useRef<HTMLInputElement>(null);
@@ -141,9 +156,19 @@ export default function AddJobForm({ resumes: allResumes, coverLetters: allCover
           occurred_at: fromDatetimeLocal(when),
           resume_id: resumeId ? Number(resumeId) : null,
           cover_letter_id: coverLetterId ? Number(coverLetterId) : null,
+          allow_duplicate: dupes !== null,
         }),
       });
+      if (res.status === 409) {
+        const data = (await res.json()) as Duplicates;
+        if (data.same_posting || data.similar?.length) {
+          setDupes(data);
+          return;
+        }
+        throw new Error(data.error ?? "Save failed");
+      }
       if (!res.ok) throw new Error((await res.json()).error ?? "Save failed");
+      setDupes(null);
       setUrl("");
       setCompany("");
       setTitle("");
@@ -301,13 +326,33 @@ export default function AddJobForm({ resumes: allResumes, coverLetters: allCover
 
       {notice && <p className="text-xs text-green-600 dark:text-green-400">{notice}</p>}
       {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+      {dupes && (
+        <div className="space-y-1 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          <p className="font-medium">{dupes.error}:</p>
+          <ul className="list-disc pl-5">
+            {[...(dupes.same_posting ? [dupes.same_posting] : []), ...dupes.similar].map((j) => (
+              <li key={j.id}>
+                <a href={`/jobs/${j.id}`} target="_blank" rel="noreferrer" className="underline">
+                  {j.company} — {j.title}
+                </a>
+                {j.url && <span className="ml-1 text-amber-700 dark:text-amber-400">({j.url.replace(/^https?:\/\//, "").slice(0, 60)})</span>}
+              </li>
+            ))}
+          </ul>
+          <p>
+            {dupes.same_posting
+              ? "It's the same posting. Add it again only if you really mean to track it twice."
+              : "Possibly a separate posting (another location or req). Add it if so."}
+          </p>
+        </div>
+      )}
 
       <button
         type="submit"
         disabled={saving}
-        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        className={`rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50 ${dupes ? "bg-amber-600 hover:bg-amber-700" : "bg-blue-600 hover:bg-blue-700"}`}
       >
-        {saving ? "Saving…" : "Save application"}
+        {saving ? "Saving…" : dupes ? "Add anyway" : "Save application"}
       </button>
     </form>
     </>

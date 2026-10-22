@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createJob, createEvent, listJobs, updateJob, upsertPosting } from "@/lib/queries";
 import { parsePostingUrl } from "@/lib/parser";
+import { findDuplicates } from "@/lib/duplicates";
 import { STATUSES } from "@/lib/types";
 
 export async function GET() {
@@ -9,9 +10,22 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { company, title, url, notes, posting, initial_status, occurred_at, resume_id, cover_letter_id } = body;
+  const { company, title, url, notes, posting, initial_status, occurred_at, resume_id, cover_letter_id, allow_duplicate } = body;
   if (!company?.trim() || !title?.trim()) {
     return NextResponse.json({ error: "company and title are required" }, { status: 400 });
+  }
+  // Already tracked (same posting), or the same company + title under another link: ask before adding.
+  if (allow_duplicate !== true) {
+    const dupes = findDuplicates({ url, company, title });
+    if (dupes.same_posting || dupes.similar.length) {
+      return NextResponse.json(
+        {
+          error: dupes.same_posting ? "You're already tracking this posting" : "You're already tracking a job with this company and title",
+          ...dupes,
+        },
+        { status: 409 }
+      );
+    }
   }
 
   let job = createJob({ company: company.trim(), title: title.trim(), url: url || null, notes });
