@@ -18,7 +18,7 @@ function findByKey(key: string): Pick<Job, "id" | "company" | "title"> | null {
   );
 }
 
-function placeholderCompany(info: { tenant: string | null; normalized: string }): string {
+export function placeholderCompany(info: { tenant: string | null; normalized: string }): string {
   if (info.tenant) return info.tenant.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   return new URL(info.normalized).hostname.replace(/^www\./, "");
 }

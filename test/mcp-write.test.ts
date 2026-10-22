@@ -16,7 +16,7 @@ const call = async (name: string, args: Record<string, unknown>, deps?: McpDeps)
 const listTools = async () => (await rpc("tools/list")).result.tools;
 const toolNames = async () => (await listTools()).map((t: { name: string }) => t.name);
 
-const WRITE_TOOLS = ["update_application", "add_status_update", "update_status_update", "upload_document"];
+const WRITE_TOOLS = ["update_application", "add_status_update", "update_status_update", "upload_document", "add_application"];
 
 const job = createJob({ company: "Write Co", title: "SWE Intern", notes: "first note" });
 createEvent({ job_id: job.id, status: "applied", occurred_at: "2026-09-01T12:00:00.000Z" });
