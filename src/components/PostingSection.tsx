@@ -96,7 +96,7 @@ export default function PostingSection({ jobId, posting, hasUrl }: { jobId: numb
         <p className="px-4 pb-2 text-xs text-zinc-500">
           Some sites (Workday) refuse the server. Open the posting in your browser and click your{" "}
           <a href="/save" className="text-blue-600 hover:underline">Save to JobManager</a> bookmark: it can fill in this
-          description.
+          description and title.
         </p>
       )}
 
