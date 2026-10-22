@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { postingIdentity } from "./duplicates";
 import type {
   AppDocument, DocumentKind, DocumentWithUsage, Job, JobWithStatus,
   Posting, Recording, Status, StatusEvent,
@@ -23,9 +24,11 @@ export function getJob(id: number): Job | null {
 }
 
 export function createJob(input: { company: string; title: string; url?: string | null; notes?: string }): Job {
+  // The posting identity is stored with the job so later duplicate checks can find it (duplicates.ts).
+  const id = postingIdentity(input.url);
   const res = getDb()
-    .prepare("INSERT INTO jobs (company, title, url, notes) VALUES (?, ?, ?, ?)")
-    .run(input.company, input.title, input.url ?? null, input.notes ?? "");
+    .prepare("INSERT INTO jobs (company, title, url, notes, posting_key, ats, ats_tenant, posting_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(input.company, input.title, input.url ?? null, input.notes ?? "", id.posting_key, id.ats, id.ats_tenant, id.posting_id);
   return getJob(Number(res.lastInsertRowid))!;
 }
 
@@ -48,6 +51,13 @@ export function updateJob(
       input.cover_letter_id !== undefined ? input.cover_letter_id : job.cover_letter_id,
       id
     );
+  // A new link means a new posting identity (left alone otherwise).
+  if (input.url !== undefined && (input.url ?? null) !== job.url) {
+    const p = postingIdentity(input.url);
+    getDb()
+      .prepare("UPDATE jobs SET posting_key = ?, ats = ?, ats_tenant = ?, posting_id = ? WHERE id = ?")
+      .run(p.posting_key, p.ats, p.ats_tenant, p.posting_id, id);
+  }
   return getJob(id);
 }
 

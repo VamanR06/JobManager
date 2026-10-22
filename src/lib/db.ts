@@ -493,7 +493,36 @@ const MIGRATIONS: { version: number; name: string; foreignKeysOff?: boolean; up:
       }
     },
   },
+  {
+    version: 9,
+    name: "duplicate keys for every job with a link (the Add form hadn't been setting them)",
+    up(db) {
+      backfillPostingKeys(db);
+    },
+  },
 ];
+
+/**
+ * Sets each job's posting_key from its link (urls.ts), so duplicate checks can
+ * find it. ats/ats_tenant/posting_id are only filled where empty: an earlier
+ * import may have recorded them from where the link redirected.
+ */
+export function backfillPostingKeys(db: Database.Database): number {
+  const cols = (db.prepare("PRAGMA table_info(jobs)").all() as { name: string }[]).map((c) => c.name);
+  if (!["posting_key", "ats", "ats_tenant", "posting_id"].every((c) => cols.includes(c))) return 0;
+  const rows = db.prepare("SELECT id, url, posting_key FROM jobs WHERE url IS NOT NULL AND url <> ''").all() as { id: number; url: string; posting_key: string | null }[];
+  const set = db.prepare(
+    "UPDATE jobs SET posting_key = ?, ats = COALESCE(ats, ?), ats_tenant = COALESCE(ats_tenant, ?), posting_id = COALESCE(posting_id, ?) WHERE id = ?"
+  );
+  let changed = 0;
+  for (const r of rows) {
+    const info = analyzeUrl(r.url);
+    if (!info.ok || info.key === r.posting_key) continue;
+    set.run(info.key, info.ats, info.tenant, info.postingId, r.id);
+    changed++;
+  }
+  return changed;
+}
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;
 

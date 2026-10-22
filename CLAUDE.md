@@ -26,6 +26,7 @@ If a schema change is needed, add it as a new numbered entry in `MIGRATIONS` in 
 ## Notes
 
 - Auto-save fields (event notes/links/score) debounce ~600ms, then flush on blur and on page unload — don't remove the `beforeunload`/`pagehide` flush, it's what prevents lost edits on refresh.
+- Duplicates: `createJob`/`updateJob` keep `jobs.posting_key` (+ ats fields) in step with the link via `postingIdentity` (`duplicates.ts`, keys from `urls.ts`). Every way of adding a job should check `findDuplicates` first (the Add form returns 409 unless `allow_duplicate`; the inbox uses the key). Never auto-merge or delete duplicates.
 - `updateEvent`/`updateJob` only overwrite fields explicitly passed (`undefined` = leave alone), so partial PATCHes are safe.
 - `jobs.workflow_state` (applying through ChatGPT) is separate from `status_events` (recruiting outcome). NULL = manually tracked job.
 - `playwright` is pinned to exactly 1.63.0: 1.64+ calls `element.checkVisibility()` unconditionally and can't drive the server's Chromium 93. Don't bump it unless the server's Chromium is 105+ (`checkPlaywrightFits` in `apply/browser.ts` guards this at launch).

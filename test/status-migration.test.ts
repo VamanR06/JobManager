@@ -12,7 +12,10 @@ const old = new Database(path.join(DATA_DIR, "app.db"));
 old.exec(`
   CREATE TABLE jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, company TEXT NOT NULL, title TEXT NOT NULL, url TEXT,
-    notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    -- Added by migration 1, so every real v5 database has them.
+    ats TEXT, ats_tenant TEXT, posting_id TEXT, posting_key TEXT, application_url TEXT,
+    workflow_state TEXT, workflow_detail TEXT, paused INTEGER NOT NULL DEFAULT 0, submitted_at TEXT
   );
   CREATE TABLE status_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
