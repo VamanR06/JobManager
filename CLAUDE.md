@@ -10,6 +10,14 @@ If a schema change is needed, add it as a new numbered entry in `MIGRATIONS` in 
 
 `npm test` is safe (scratch DB, local copies of application forms, headless browser; never real sites or submissions).
 
+## Versions
+
+Every change to `main` gets a version so it can be referenced ("that broke in v0.25.1"):
+
+- In each PR, bump `package.json` (`npm version <x.y.z> --no-git-tag-version`, which updates the lockfile too): a new minor (`0.X.0`) for a feature, a patch (`0.X.Y`) for a fix. Add a row at the top of `CHANGELOG.md`, and put the version in the PR title and the commit subject (`v0.30.0: …`). Tell the user the version in the summary.
+- After the PR is merged, tag the merge commit: `git tag -a v0.30.0 <merge sha> -m "v0.30.0: …"` and `git push origin v0.30.0`. Tags are only ever added: never move, delete or re-point one, and never rewrite history on `main` to add versions.
+- The running version shows in the page footer and the MCP server's `serverInfo.version` (`src/lib/version.ts`, from package.json), so "which build is deployed?" is answered by looking.
+
 ## Layout
 
 - `src/lib/db.ts` — schema + migrations

@@ -3,6 +3,7 @@ import { browserTools, isBrowserTool, mcpBrowserEnabled, mcpSubmitEnabled, runBr
 import { mcpWriteEnabled, runWriteTool, ToolInputError, WRITE_TOOLS, type FileDownloader, type PostingParser } from "./mcp-write";
 import { getDocument, getJob, getPosting, listDocuments, listEvents, listJobs, pendingAfter } from "./queries";
 import { STATUSES, statusLabel, type DocumentKind, type Status, type StatusEvent } from "./types";
+import { APP_VERSION } from "./version";
 
 /**
  * A minimal MCP server (Streamable HTTP, stateless, plain JSON responses — no
@@ -303,7 +304,7 @@ async function dispatch(req: RpcRequest, deps: McpDeps): Promise<unknown> {
       return {
         protocolVersion: typeof asked === "string" && SUPPORTED_VERSIONS.includes(asked) ? asked : SUPPORTED_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "jobmanager", title: "JobManager", version: "1.0.0" },
+        serverInfo: { name: "jobmanager", title: "JobManager", version: APP_VERSION },
         instructions: instructions(),
       };
     }
