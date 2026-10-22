@@ -141,6 +141,35 @@ async function readCapped(res: Response, maxBytes: number): Promise<Buffer> {
 type SafeFetchOptions = { accept?: string; timeoutMs?: number; maxRedirects?: number; maxBytes?: number; resolve?: Resolver };
 
 /**
+ * No HTTP response at all. Node only says "fetch failed"; the reason (connection
+ * reset, timeout, DNS, TLS…) is in its cause, so it's spelled out here.
+ */
+export class FetchConnectError extends Error {
+  readonly code: string;
+  constructor(host: string, err: unknown, timeoutSec: number) {
+    const e = err as Error & { name?: string; cause?: { code?: string; message?: string; errors?: { code?: string }[] } };
+    // Several addresses tried at once come back as an AggregateError-style cause with errors[].
+    const code = e?.name === "TimeoutError" || e?.name === "AbortError"
+      ? "TIMEOUT"
+      : e?.cause?.code ?? e?.cause?.errors?.find((x) => x?.code)?.code ?? e?.cause?.message ?? e?.message ?? String(err);
+    const why: Record<string, string> = {
+      TIMEOUT: `no answer within ${timeoutSec}s`,
+      ECONNRESET: "the connection was cut off (often a firewall or bot protection refusing this network)",
+      ECONNREFUSED: "the connection was refused",
+      ETIMEDOUT: "the connection timed out",
+      UND_ERR_CONNECT_TIMEOUT: "the connection timed out",
+      ENOTFOUND: "the name doesn't resolve (DNS)",
+      EAI_AGAIN: "DNS lookup failed (temporary)",
+      ENETUNREACH: "the network is unreachable from this server",
+      EHOSTUNREACH: "the host is unreachable from this server",
+      UND_ERR_SOCKET: "the connection was closed unexpectedly",
+    };
+    super(`Couldn't connect to ${host}: ${why[code] ? `${why[code]} (${code})` : code}`);
+    this.code = code;
+  }
+}
+
+/**
  * GET with manual redirects, validating every hop against the guard. Returns the
  * final body (capped) along with the redirect chain so both URLs can be stored.
  */
@@ -157,15 +186,20 @@ export async function safeFetchBytes(url: string, opts: SafeFetchOptions = {}): 
   for (let hop = 0; hop <= (opts.maxRedirects ?? 5); hop++) {
     await assertPublicUrl(current, opts.resolve);
     chain.push(current);
-    const res = await fetch(current, {
-      headers: {
-        "User-Agent": USER_AGENT,
-        Accept: opts.accept ?? "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-      },
-      redirect: "manual",
-      signal: deadline,
-    });
+    let res: Response;
+    try {
+      res = await fetch(current, {
+        headers: {
+          "User-Agent": USER_AGENT,
+          Accept: opts.accept ?? "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+        redirect: "manual",
+        signal: deadline,
+      });
+    } catch (err) {
+      throw new FetchConnectError(new URL(current).hostname, err, (opts.timeoutMs ?? 20_000) / 1000);
+    }
     if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
       current = new URL(res.headers.get("location")!, current).toString();
       await res.body?.cancel();
