@@ -139,7 +139,7 @@ export default function SaveFromBrowser() {
     return (
       <div className="space-y-2 text-sm">
         <p className="text-green-700 dark:text-green-400">
-          {result.outcome === "created" ? "Saved as a new application (To apply)." : "Description filled in."}
+          {result.outcome === "created" ? "Saved as a new application (To apply)." : "Description and title filled in."}
         </p>
         <a href={`/jobs/${result.job_id}`} className="text-blue-600 hover:underline">Open the application →</a>
       </div>
@@ -177,7 +177,7 @@ export default function SaveFromBrowser() {
                 <a href={`/jobs/${dup.same_posting.id}`} className="underline">{dup.same_posting.company} — {dup.same_posting.title}</a>
               </p>
               <button disabled={busy} onClick={() => save({ job_id: dup.same_posting!.id })} className="rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-50">
-                Fill in its description
+                Fill in its description and title
               </button>
             </div>
           )}
@@ -188,7 +188,7 @@ export default function SaveFromBrowser() {
                 {dup.similar.map((j) => (
                   <li key={j.id}>
                     <a href={`/jobs/${j.id}`} className="underline">{j.company} — {j.title}</a>{" "}
-                    <button disabled={busy} onClick={() => save({ job_id: j.id })} className="ml-1 text-xs underline">fill in this one&apos;s description</button>
+                    <button disabled={busy} onClick={() => save({ job_id: j.id })} className="ml-1 text-xs underline">fill in this one&apos;s description and title</button>
                   </li>
                 ))}
               </ul>

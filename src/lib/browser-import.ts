@@ -1,6 +1,7 @@
 import { getDb } from "./db";
 import { findDuplicates, type JobRef } from "./duplicates";
 import { htmlToMarkdown } from "./parser";
+import { placeholderCompany } from "./inbox";
 import { createEvent, createJob, getJob, updateJob, upsertPosting } from "./queries";
 import { analyzeUrl } from "./urls";
 
@@ -35,10 +36,18 @@ export function descriptionMarkdown(p: BrowserPosting): string {
   return (html ? htmlToMarkdown(html) : text ?? "").trim();
 }
 
+/** The existing company is only a stand-in from a link-only import (the site's name or the ATS tenant). */
+function isPlaceholderCompany(company: string, url: string | null): boolean {
+  if (!company.trim()) return true;
+  const info = url ? analyzeUrl(url) : null;
+  return !!info?.ok && company === placeholderCompany(info);
+}
+
 /**
  * Adds the posting as a new 'to apply' application, or (with jobId) fills in
- * an existing application's description. A new one goes through the same
- * duplicate checks as the Add form unless allowDuplicate.
+ * an existing application: its description and title, and its company too if
+ * that was only a placeholder. A new one goes through the same duplicate
+ * checks as the Add form unless allowDuplicate.
  */
 export function importFromBrowser(p: BrowserPosting, opts: { jobId?: number; allowDuplicate?: boolean } = {}): BrowserImportResult {
   const info = typeof p.url === "string" ? analyzeUrl(p.url) : null;
@@ -53,7 +62,12 @@ export function importFromBrowser(p: BrowserPosting, opts: { jobId?: number; all
     const job = getJob(opts.jobId);
     if (!job) throw new BrowserImportError(`No application ${opts.jobId}`);
     upsertPosting({ job_id: job.id, title, company, location, description_md, source: "parsed", fetch_status: "ok" });
-    if (!job.url) updateJob(job.id, { url: info.normalized });
+    updateJob(job.id, {
+      title: title ?? undefined,
+      // A company the person typed is kept; a placeholder ("micron" from the link) is replaced.
+      company: company && isPlaceholderCompany(job.company, job.url) ? company : undefined,
+      url: job.url ? undefined : info.normalized,
+    });
     return { outcome: "updated", job_id: job.id };
   }
 
