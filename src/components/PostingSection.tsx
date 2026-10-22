@@ -92,6 +92,13 @@ export default function PostingSection({ jobId, posting, hasUrl }: { jobId: numb
         </span>
       </div>
       {error && <p className="px-4 pb-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
+      {error && (
+        <p className="px-4 pb-2 text-xs text-zinc-500">
+          Some sites (Workday) refuse the server. Open the posting in your browser and click your{" "}
+          <a href="/save" className="text-blue-600 hover:underline">Save to JobManager</a> bookmark: it can fill in this
+          description.
+        </p>
+      )}
 
       {open && (
         <div className="border-t border-zinc-100 px-4 py-4 dark:border-zinc-800">

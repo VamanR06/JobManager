@@ -4,7 +4,7 @@ import { DOCUMENT_EXTENSIONS, saveUploadedDocument } from "./documents";
 import { findDuplicates, type JobRef } from "./duplicates";
 import { placeholderCompany, UNKNOWN_TITLE } from "./inbox";
 import { safeFetchBytes } from "./netguard";
-import { parsePostingUrl, type ParsedPosting } from "./parser";
+import { htmlToMarkdown, parsePostingUrl, type ParsedPosting } from "./parser";
 import { createEvent, createJob, getDocument, getEvent, getJob, updateEvent, updateJob, upsertPosting } from "./queries";
 import { analyzeUrl } from "./urls";
 import { STATUSES, type DocumentKind, type Status } from "./types";
@@ -154,7 +154,7 @@ export const WRITE_TOOLS = [
     name: "add_application",
     title: "Save a job posting",
     description:
-      "Adds a job posting link to the tracker with status 'to apply', like the user's share sheet: fetches the posting (title, company, location, description) and checks for duplicates first. If the posting is already tracked, nothing is added and the existing application is returned (added: false). If the same company and title is tracked under another link, nothing is added and the matches come back in similar; call again with allow_duplicate: true only if the user confirms it's a separate posting. Pass company/title when the page can't be read or the user named them. Returns added and the application (with its id for upload_document, update_application or browser_open).",
+      "Adds a job posting link to the tracker with status 'to apply', like the user's share sheet: fetches the posting (title, company, location, description) and checks for duplicates first. If the posting is already tracked, nothing is added and the existing application is returned (added: false). If the same company and title is tracked under another link, nothing is added and the matches come back in similar; call again with allow_duplicate: true only if the user confirms it's a separate posting. Pass company/title when the page can't be read or the user named them. For Workday links (the server's network is blocked there) read the posting yourself and pass description, company, title and location. Returns added and the application (with its id for upload_document, update_application or browser_open).",
     inputSchema: {
       type: "object",
       properties: {
@@ -162,6 +162,11 @@ export const WRITE_TOOLS = [
         company: { type: "string", description: "Company name, if the user gave it or the page doesn't say. Otherwise taken from the posting." },
         title: { type: "string", description: "Job title, if the user gave it or the page doesn't say." },
         notes: { type: "string", description: "Notes to start the application with." },
+        description: {
+          type: "string",
+          description: "The posting's full job description, if you've read the page yourself. Pass it for sites the server can't reach (Workday blocks it): then the server doesn't fetch the page. Copy it faithfully; don't summarise.",
+        },
+        location: { type: "string", description: "The job's location, with description." },
         allow_duplicate: { type: "boolean", default: false, description: "Add even though the same company + title is already tracked under another link (only after the user confirms)." },
       },
       required: ["url"],
@@ -374,11 +379,11 @@ const ALREADY = "This posting is already tracked; here it is. Nothing was added.
 
 /** add_application: the share sheet's path (fetch the posting, check duplicates, save as 'to apply'). */
 async function addApplication(args: Record<string, unknown>, parse: PostingParser): Promise<WriteResult> {
-  rejectUnknown(args, ["url", "company", "title", "notes", "allow_duplicate"]);
+  rejectUnknown(args, ["url", "company", "title", "notes", "description", "location", "allow_duplicate"]);
   if (typeof args.url !== "string" || !args.url.trim()) throw new ToolInputError("url must be the posting's link.");
   const info = analyzeUrl(args.url);
   if (!info.ok) throw new ToolInputError(`Can't save that link: ${info.message}.`);
-  for (const k of ["company", "title", "notes"] as const) {
+  for (const k of ["company", "title", "notes", "description", "location"] as const) {
     if (args[k] !== undefined && typeof args[k] !== "string") throw new ToolInputError(`${k} must be text.`);
   }
   if (args.allow_duplicate !== undefined && typeof args.allow_duplicate !== "boolean") throw new ToolInputError("allow_duplicate must be true or false.");
@@ -388,10 +393,18 @@ async function addApplication(args: Record<string, unknown>, parse: PostingParse
 
   let parsed: ParsedPosting | null = null;
   let fetchError: string | null = null;
-  try {
-    parsed = await parse(info.normalized);
-  } catch (err) {
-    fetchError = err instanceof Error ? err.message : String(err);
+  const given = text(args.description);
+  if (given) {
+    // Read by ChatGPT itself; the page isn't fetched (some sites refuse the server).
+    if (given.length < 50) throw new ToolInputError("description is too short to be the posting's description; pass the full text.");
+    const md = /<\/?(p|div|ul|li|br|h\d|strong|b)\b/i.test(given) ? htmlToMarkdown(given) : given;
+    parsed = { title: text(args.title), company: text(args.company), location: text(args.location), description_md: md.slice(0, 200_000) };
+  } else {
+    try {
+      parsed = await parse(info.normalized);
+    } catch (err) {
+      fetchError = err instanceof Error ? err.message : String(err);
+    }
   }
   const company = text(args.company) ?? (parsed?.company?.trim() || placeholderCompany(info));
   const title = text(args.title) ?? (parsed?.title?.trim() || UNKNOWN_TITLE);
@@ -427,7 +440,7 @@ async function addApplication(args: Record<string, unknown>, parse: PostingParse
       extra: {
         added: true,
         ...(fetchError && {
-          note: `Saved, but the posting couldn't be read (${fetchError}), so its description is empty${guessed ? " and the company/title are placeholders: fix them with update_application" : ""}.`,
+          note: `Saved, but the posting couldn't be read (${fetchError}), so its description is empty${guessed ? " and the company/title are placeholders: fix them with update_application" : ""}. To fill it in, the user can click their Save to JobManager bookmark on that posting (it offers to fill in this application) or paste the description on the job page.`,
         }),
       },
     };
