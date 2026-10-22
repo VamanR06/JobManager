@@ -1,7 +1,7 @@
 import { Readability } from "@mozilla/readability";
 import { JSDOM, VirtualConsole } from "jsdom";
 import TurndownService from "turndown";
-import { safeFetch } from "./netguard";
+import { safeFetch, type SafeResponse } from "./netguard";
 
 export interface ParsedPosting {
   title: string | null;
@@ -80,9 +80,9 @@ function fromJsonLd(doc: Document): ParsedPosting | null {
       org && typeof org === "object" ? str((org as JsonLdNode).name) : str(org);
 
     return {
-      title: str(posting.title),
-      company,
-      location: extractLocation(posting),
+      title: decoded(str(posting.title)),
+      company: decoded(company),
+      location: decoded(extractLocation(posting)),
       description_md: description ? htmlToMarkdown(description) : "",
       employment_type: Array.isArray(posting.employmentType)
         ? posting.employmentType.filter((t) => typeof t === "string").join(", ") || null
@@ -95,6 +95,84 @@ function fromJsonLd(doc: Document): ParsedPosting | null {
     };
   }
   return null;
+}
+
+/** Some sites double-escape text in JSON-LD ("AT&amp;T"); decode it once. */
+function decoded(v: string | null): string | null {
+  if (!v || !/&(#\d+|#x[\da-f]+|[a-z]+);/i.test(v)) return v;
+  const doc = new JSDOM("<!doctype html><textarea></textarea>").window.document;
+  const el = doc.querySelector("textarea")!;
+  el.innerHTML = v;
+  return el.value.trim() || v;
+}
+
+// ---------- Workday ----------
+//
+// Workday's job pages are built by JavaScript. Most tenants also put the posting
+// in the page as JSON-LD, but not all, so its own JSON API (what the page's
+// script calls) is asked first. It also says when a posting is closed.
+
+/** The Workday JSON API address for a posting link, or null if it isn't one. */
+export function workdayApiUrl(url: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const host = u.hostname.toLowerCase();
+  const segs = u.pathname.split("/").filter(Boolean);
+  const job = segs.indexOf("job");
+  if (job < 1 || job + 2 > segs.length) return null;
+  let tenant: string | null = null;
+  if (host.endsWith(".myworkdayjobs.com")) tenant = host.split(".")[0];
+  // wd1.myworkdaysite.com/{locale?}/recruiting/{tenant}/{site}/job/…
+  else if (host.endsWith(".myworkdaysite.com") || host === "myworkdaysite.com") {
+    const r = segs.indexOf("recruiting");
+    tenant = r >= 0 && r + 1 < job ? segs[r + 1] : null;
+  }
+  if (!tenant) return null;
+  const site = segs[job - 1];
+  // Apply links (…/job/<location>/<title>_<id>/apply/…) point at the same posting.
+  const end = segs.indexOf("apply", job);
+  const path = segs.slice(job, end > job ? end : undefined);
+  return `https://${host}/wday/cxs/${tenant}/${site}/${path.join("/")}`;
+}
+
+type WorkdayResult = { posting: ParsedPosting } | { closed: true } | { failed: string };
+
+async function fromWorkdayApi(api: string, fetcher: Fetcher): Promise<WorkdayResult> {
+  let res: SafeResponse;
+  try {
+    res = await fetcher(api, "application/json");
+  } catch (err) {
+    return { failed: err instanceof Error ? err.message : String(err) };
+  }
+  let body: Record<string, unknown> | null = null;
+  try {
+    body = JSON.parse(res.body);
+  } catch {
+    body = null;
+  }
+  // A closed or unlisted posting: 404, or Workday's own "permission denied" (S22).
+  if (res.status === 404 || (res.status === 403 && body?.errorCode === "S22")) return { closed: true };
+  if (!res.ok || !body) return { failed: `Workday API HTTP ${res.status}${body ? "" : res.body.trimStart().startsWith("<") ? " (an HTML page, not data: probably a bot check)" : ""}` };
+  const info = (body.jobPostingInfo ?? {}) as Record<string, unknown>;
+  if (info.canApply === false) return { closed: true };
+  const html = str(info.jobDescription);
+  if (!html) return { failed: "Workday API returned no description" };
+  const org = (body.hiringOrganization ?? {}) as Record<string, unknown>;
+  return {
+    posting: {
+      title: decoded(str(info.title)),
+      company: decoded(str(org.name)),
+      location: decoded(str(info.location)),
+      description_md: htmlToMarkdown(html),
+      employment_type: str(info.timeType),
+      posting_id: str(info.jobReqId),
+      valid_through: str(info.endDate),
+    },
+  };
 }
 
 // ---------- Readability fallback ----------
@@ -120,11 +198,26 @@ export function parsePostingHtml(html: string, url: string): ParsedPosting | nul
   return fromJsonLd(dom.window.document) ?? fromReadability(dom);
 }
 
-export async function parsePostingUrl(url: string): Promise<ParsedPosting> {
-  // safeFetch refuses private/local hosts at every redirect hop.
-  const res = await safeFetch(url);
-  if (!res.ok) throw new Error(`Fetch failed: HTTP ${res.status}`);
-  const result = parsePostingHtml(res.body, res.finalUrl);
-  if (!result || !result.description_md) throw new Error("Could not extract posting content");
-  return result;
+/** Fetches a URL (GET); swappable in tests. safeFetch refuses private/local hosts at every redirect hop. */
+export type Fetcher = (url: string, accept?: string) => Promise<SafeResponse>;
+const defaultFetcher: Fetcher = (url, accept) => safeFetch(url, accept ? { accept } : {});
+
+export async function parsePostingUrl(url: string, fetcher: Fetcher = defaultFetcher): Promise<ParsedPosting> {
+  const api = workdayApiUrl(url);
+  const workday = api ? await fromWorkdayApi(api, fetcher) : null;
+  if (workday && "posting" in workday) return workday.posting;
+
+  const res = await fetcher(url);
+  const result = res.ok ? parsePostingHtml(res.body, res.finalUrl) : null;
+  if (result?.description_md) return result;
+
+  if (workday && "closed" in workday) {
+    throw new Error("This Workday posting is closed or no longer public. If you still need it, paste the description with Edit manually.");
+  }
+  const why = [
+    workday && "failed" in workday ? workday.failed : null,
+    res.ok ? null : `page HTTP ${res.status}`,
+  ].filter(Boolean).join("; ");
+  if (!res.ok && !workday) throw new Error(`Fetch failed: HTTP ${res.status}`);
+  throw new Error(`Could not extract posting content${why ? ` (${why})` : ""}`);
 }
