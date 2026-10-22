@@ -101,6 +101,11 @@ read-only:
 
 Set `JOBMANAGER_MCP_WRITE=1` to also allow edits. Nothing can be deleted this way:
 
+- `add_application` saves a job link, like the share sheet: it reads the posting (title, company, location,
+  description) and saves it as **To apply**. It checks for duplicates first: an already-tracked posting comes back
+  as-is (`added: false`); the same company and title under another link comes back in `similar`, and is only added
+  with `allow_duplicate: true`. Pass `company`/`title` if the page can't be read. The result has the new
+  application's `id` for `upload_document`, `update_application` or `browser_open`.
 - `update_application` changes company, title, posting URL, general notes (`notes` replaces them,
   `append_notes` adds a paragraph) and the linked resume / cover letter. Only the fields passed change.
 - `add_status_update` adds a status (OA, interview, rejected…) with its fields: dates, score, round,

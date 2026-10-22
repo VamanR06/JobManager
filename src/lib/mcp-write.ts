@@ -1,7 +1,12 @@
 import path from "path";
+import { getDb } from "./db";
 import { DOCUMENT_EXTENSIONS, saveUploadedDocument } from "./documents";
+import { findDuplicates, type JobRef } from "./duplicates";
+import { placeholderCompany, UNKNOWN_TITLE } from "./inbox";
 import { safeFetchBytes } from "./netguard";
-import { createEvent, getDocument, getEvent, getJob, updateEvent, updateJob } from "./queries";
+import { parsePostingUrl, type ParsedPosting } from "./parser";
+import { createEvent, createJob, getDocument, getEvent, getJob, updateEvent, updateJob, upsertPosting } from "./queries";
+import { analyzeUrl } from "./urls";
 import { STATUSES, type DocumentKind, type Status } from "./types";
 
 /**
@@ -144,6 +149,25 @@ export const WRITE_TOOLS = [
     annotations: { ...WRITE, destructiveHint: false, idempotentHint: true },
     // ChatGPT Apps SDK: this argument is a file from the conversation, sent as { download_url, file_id, … }.
     _meta: { "openai/fileParams": ["file"] },
+  },
+  {
+    name: "add_application",
+    title: "Save a job posting",
+    description:
+      "Adds a job posting link to the tracker with status 'to apply', like the user's share sheet: fetches the posting (title, company, location, description) and checks for duplicates first. If the posting is already tracked, nothing is added and the existing application is returned (added: false). If the same company and title is tracked under another link, nothing is added and the matches come back in similar; call again with allow_duplicate: true only if the user confirms it's a separate posting. Pass company/title when the page can't be read or the user named them. Returns added and the application (with its id for upload_document, update_application or browser_open).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Link to the job posting (an ATS page like Greenhouse/Lever/Ashby/Workday, or the employer's careers page)." },
+        company: { type: "string", description: "Company name, if the user gave it or the page doesn't say. Otherwise taken from the posting." },
+        title: { type: "string", description: "Job title, if the user gave it or the page doesn't say." },
+        notes: { type: "string", description: "Notes to start the application with." },
+        allow_duplicate: { type: "boolean", default: false, description: "Add even though the same company + title is already tracked under another link (only after the user confirms)." },
+      },
+      required: ["url"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
 ];
 
@@ -336,12 +360,84 @@ async function uploadDocument(args: Record<string, unknown>, download: FileDownl
 export interface WriteResult {
   /** The application that changed (or was linked), to return its updated state. */
   applicationId: number | null;
+  /** Extra fields for the tool result (add_application: added, similar, note). */
+  extra?: Record<string, unknown>;
   /** Set by upload_document. */
   document?: { id: number; kind: DocumentKind; name: string; version: number; duplicate: boolean };
 }
 
+/** Fetches and reads a posting page; swappable in tests. */
+export type PostingParser = (url: string) => Promise<ParsedPosting>;
+
+const ref = (j: JobRef) => ({ id: j.id, company: j.company, title: j.title, url: j.url });
+const ALREADY = "This posting is already tracked; here it is. Nothing was added.";
+
+/** add_application: the share sheet's path (fetch the posting, check duplicates, save as 'to apply'). */
+async function addApplication(args: Record<string, unknown>, parse: PostingParser): Promise<WriteResult> {
+  rejectUnknown(args, ["url", "company", "title", "notes", "allow_duplicate"]);
+  if (typeof args.url !== "string" || !args.url.trim()) throw new ToolInputError("url must be the posting's link.");
+  const info = analyzeUrl(args.url);
+  if (!info.ok) throw new ToolInputError(`Can't save that link: ${info.message}.`);
+  for (const k of ["company", "title", "notes"] as const) {
+    if (args[k] !== undefined && typeof args[k] !== "string") throw new ToolInputError(`${k} must be text.`);
+  }
+  if (args.allow_duplicate !== undefined && typeof args.allow_duplicate !== "boolean") throw new ToolInputError("allow_duplicate must be true or false.");
+
+  const tracked = findDuplicates({ url: info.normalized }).same_posting;
+  if (tracked) return { applicationId: tracked.id, extra: { added: false, note: ALREADY } };
+
+  let parsed: ParsedPosting | null = null;
+  let fetchError: string | null = null;
+  try {
+    parsed = await parse(info.normalized);
+  } catch (err) {
+    fetchError = err instanceof Error ? err.message : String(err);
+  }
+  const company = text(args.company) ?? (parsed?.company?.trim() || placeholderCompany(info));
+  const title = text(args.title) ?? (parsed?.title?.trim() || UNKNOWN_TITLE);
+
+  if (args.allow_duplicate !== true) {
+    const similar = findDuplicates({ company, title }).similar;
+    if (similar.length) {
+      return {
+        applicationId: null,
+        extra: {
+          added: false,
+          similar: similar.map(ref),
+          note: `"${company} — ${title}" is already tracked under a different link. Ask the user whether this is a separate posting (another location or req); if so, call add_application again with allow_duplicate: true.`,
+        },
+      };
+    }
+  }
+
+  // The fetch awaited, so the same-posting check is repeated inside the insert.
+  return getDb().transaction((): WriteResult => {
+    const again = findDuplicates({ url: info.normalized }).same_posting;
+    if (again) return { applicationId: again.id, extra: { added: false, note: ALREADY } };
+    const job = createJob({ company, title, url: info.normalized, notes: text(args.notes) ?? "" });
+    upsertPosting(
+      parsed
+        ? { job_id: job.id, ...parsed, source: "parsed", fetch_status: "ok" }
+        : { job_id: job.id, description_md: "", source: "parsed", fetch_status: "failed" }
+    );
+    createEvent({ job_id: job.id, status: "to_apply" });
+    const guessed = title === UNKNOWN_TITLE || company === placeholderCompany(info);
+    return {
+      applicationId: job.id,
+      extra: {
+        added: true,
+        ...(fetchError && {
+          note: `Saved, but the posting couldn't be read (${fetchError}), so its description is empty${guessed ? " and the company/title are placeholders: fix them with update_application" : ""}.`,
+        }),
+      },
+    };
+  }).immediate();
+}
+
 /** Runs a write tool, or returns null for an unknown tool name. */
-export async function runWriteTool(name: string, args: Record<string, unknown>, download = defaultDownloader): Promise<WriteResult | null> {
+export async function runWriteTool(
+  name: string, args: Record<string, unknown>, download = defaultDownloader, parse: PostingParser = parsePostingUrl
+): Promise<WriteResult | null> {
   switch (name) {
     case "update_application":
       return { applicationId: updateApplication(args) };
@@ -351,6 +447,8 @@ export async function runWriteTool(name: string, args: Record<string, unknown>, 
       return { applicationId: updateStatusUpdate(args) };
     case "upload_document":
       return uploadDocument(args, download);
+    case "add_application":
+      return addApplication(args, parse);
     default:
       return null;
   }

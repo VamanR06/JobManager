@@ -1,6 +1,6 @@
 import type { Harness } from "./apply/harness";
 import { browserTools, isBrowserTool, mcpBrowserEnabled, mcpSubmitEnabled, runBrowserTool } from "./mcp-browser";
-import { mcpWriteEnabled, runWriteTool, ToolInputError, WRITE_TOOLS, type FileDownloader } from "./mcp-write";
+import { mcpWriteEnabled, runWriteTool, ToolInputError, WRITE_TOOLS, type FileDownloader, type PostingParser } from "./mcp-write";
 import { getDocument, getJob, getPosting, listDocuments, listEvents, listJobs, pendingAfter } from "./queries";
 import { STATUSES, statusLabel, type DocumentKind, type Status, type StatusEvent } from "./types";
 
@@ -210,6 +210,8 @@ function toolError(text: string) {
 /** Injectable for tests. */
 export interface McpDeps {
   download?: FileDownloader;
+  /** Tests: stands in for fetching a posting page (add_application). */
+  parse?: PostingParser;
   harness?: Harness;
   /** This app's public address, for links in results (e.g. "https://jobs.example.com"). */
   baseUrl?: string | null;
@@ -262,8 +264,9 @@ async function runTool(name: unknown, args: Record<string, unknown>, deps: McpDe
   }
   if (typeof name === "string" && WRITE_TOOLS.some((t) => t.name === name)) {
     if (!mcpWriteEnabled()) return toolError("Editing is turned off on this server (JOBMANAGER_MCP_WRITE is not set).");
-    const done = (await runWriteTool(name, args, deps.download))!;
+    const done = (await runWriteTool(name, args, deps.download, deps.parse))!;
     const application = done.applicationId !== null ? getApplication(done.applicationId) : null;
+    if (done.extra) return result({ ...done.extra, ...(application && { application }) });
     if (!done.document) return result(application!);
     return result({ document: done.document, ...(application && { application }) });
   }
@@ -279,7 +282,7 @@ class RpcError extends Error {
 function instructions(): string {
   const parts = [
     mcpWriteEnabled()
-      ? "The user's job-application tracker. Find applications with list_applications (search with query), read one with get_application, edit with update_application, add_status_update and update_status_update, and save an attached resume or cover letter with upload_document. Confirm with the user before changing anything they didn't clearly ask for."
+      ? "The user's job-application tracker. Find applications with list_applications (search with query), read one with get_application, save a new job link with add_application, edit with update_application, add_status_update and update_status_update, and save an attached resume or cover letter with upload_document. Confirm with the user before changing anything they didn't clearly ask for."
       : "Read-only access to the user's job-application tracker. Find applications with list_applications (search with query) and read one with get_application.",
   ];
   if (mcpBrowserEnabled()) {
