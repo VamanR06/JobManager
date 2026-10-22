@@ -58,6 +58,22 @@ jobs.example.com {
   (Fly.io, Railway, Render disk…), not a serverless platform like Vercel.
 - Everything works on a Linux server except interview recording, which is macOS only.
 
+## Sites that refuse the server (Workday): Save to JobManager
+
+JobManager reads postings from the server it runs on. Some sites refuse that network outright. **Workday does**:
+from a hosted server, every `*.myworkdayjobs.com` request times out, though the same links work from home. (Fetches
+"worked before" because the app ran on a Mac then.) For those, your own browser reads the posting:
+
+1. Open **`/save`** in JobManager and drag **Save to JobManager** to your bookmarks bar.
+2. On any job posting, click the bookmark. It reads the posting in that tab (Workday through its own API, which
+   is same-site there; other sites from their JobPosting data, else the page text) and opens `/save` with it. The
+   posting travels in the URL fragment, so it's never sent anywhere else.
+3. Check it and press **Save**. It goes through the same duplicate checks as the Add form. For a job you already
+   track (e.g. one whose fetch failed) it offers **Fill in its description** instead.
+
+From ChatGPT, `add_application` takes a `description` (and `location`): ChatGPT reads the page from OpenAI's
+network and passes the text, and the server doesn't fetch it.
+
 ## Adding jobs from your phone (share sheet)
 
 An iOS Shortcut can send whatever you share (a job link, or a caption or message with links in it)
