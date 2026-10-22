@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { bookmarklet } from "@/lib/bookmarklet";
 
 interface Posting {
@@ -43,7 +43,13 @@ export default function SaveFromBrowser() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
-  const linkRef = useRef<HTMLAnchorElement>(null);
+  const [copied, setCopied] = useState(false);
+  // React won't render javascript: URLs, so the bookmarklet's address is set on the element
+  // itself, as soon as it exists. (It's only rendered after loading; setting it from the
+  // load effect found no element and left the link pointing at "#", i.e. just /save.)
+  const bookmarkRef = useCallback((el: HTMLAnchorElement | null) => {
+    el?.setAttribute("href", bookmarklet(window.location.origin));
+  }, []);
 
   useEffect(() => {
     const hash = window.location.hash.slice(1);
@@ -56,8 +62,6 @@ export default function SaveFromBrowser() {
         setError("That link didn't contain a job posting.");
       }
     }
-    // React won't render javascript: URLs, so the bookmarklet's address is set directly.
-    linkRef.current?.setAttribute("href", bookmarklet(window.location.origin));
     setLoaded(true);
   }, []);
 
@@ -95,10 +99,25 @@ export default function SaveFromBrowser() {
       <ol className="list-decimal space-y-1 pl-5">
         <li>
           Drag this to your bookmarks bar:{" "}
-          <a ref={linkRef} href="#" onClick={(e) => e.preventDefault()} className="rounded-md bg-blue-600 px-3 py-1 font-medium text-white">
+          <a ref={bookmarkRef} href="#" onClick={(e) => e.preventDefault()} className="rounded-md bg-blue-600 px-3 py-1 font-medium text-white">
             Save to JobManager
-          </a>
-          <span className="ml-2 text-xs text-zinc-500">(on a phone: copy the link and save it as a bookmark&apos;s address)</span>
+          </a>{" "}
+          <button
+            type="button"
+            onClick={async () => {
+              await navigator.clipboard.writeText(bookmarklet(window.location.origin)).catch(() => {});
+              setCopied(true);
+            }}
+            className="ml-1 text-xs text-blue-600 hover:underline"
+          >
+            {copied ? "Copied" : "Copy its code"}
+          </button>
+          <span className="ml-2 text-xs text-zinc-500">
+            (can&apos;t drag, e.g. on a phone? Bookmark any page, then edit the bookmark and paste the code as its address)
+          </span>
+          <p className="text-xs text-zinc-500">
+            If you already added it and clicking it just opens this page, delete that bookmark and drag this one again.
+          </p>
         </li>
         <li>Open a job posting (any Workday job, or any site) and click the bookmark.</li>
         <li>This page opens with the posting. Check it and press Save.</li>
