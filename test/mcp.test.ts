@@ -31,6 +31,8 @@ test("initialize, tools/list and notifications", async () => {
   const init = (await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } }))!;
   assert.equal(init.result.protocolVersion, "2025-06-18");
   assert.ok(init.result.capabilities.tools);
+  // The deployed build's version, so it's clear which one ChatGPT is talking to.
+  assert.equal(init.result.serverInfo.version, (await import("../package.json")).version);
   assert.equal((await rpc("initialize", { protocolVersion: "1999-01-01" }))!.result.protocolVersion, "2025-11-25");
   assert.equal((await rpc("notifications/initialized", undefined, true)), null);
   const tools = (await rpc("tools/list"))!.result.tools;
