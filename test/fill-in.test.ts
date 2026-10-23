@@ -26,20 +26,21 @@ test("filling in an existing job sets its title (and a placeholder company) alon
   assert.match(getPosting(before.id)!.description_md, /machine learning models/);
 });
 
-test("a company the person typed is kept; the title shown on /save (possibly edited) is used", () => {
-  // (Typing exactly the placeholder, "Micron" here, can't be told apart from it, so that one would be replaced.)
+test("the title and company shown on /save (possibly edited) replace the job's", () => {
   const job = createJob({ company: "Micron Technology", title: "ML intern?", url: "https://micron.wd1.myworkdayjobs.com/en-US/External/job/Boise-ID/ML-Intern_JR2" });
   importFromBrowser(
-    { url: "https://micron.wd1.myworkdayjobs.com/en-US/External/job/Boise-ID/ML-Intern_JR2", title: "ML Intern (Summer 2027)", company: "1000 Micron Technology, Inc.", description_html: DESC },
+    { url: "https://micron.wd1.myworkdayjobs.com/en-US/External/job/Boise-ID/ML-Intern_JR2", title: "ML Intern (Summer 2027)", company: "Micron", description_html: DESC },
     { jobId: job.id }
   );
   const after = getJob(job.id)!;
   assert.equal(after.title, "ML Intern (Summer 2027)");
-  assert.equal(after.company, "Micron Technology", "typed by the person, not a placeholder: kept");
+  assert.equal(after.company, "Micron");
 });
 
-test("no title on the page leaves the existing one alone", () => {
+test("a blank title or company leaves the job's own value", () => {
   const job = createJob({ company: "Acme", title: "Platform Intern", url: "https://careers.acme.com/jobs/9" });
-  importFromBrowser({ url: "https://careers.acme.com/jobs/9", title: "  ", description_text: "We build the platform everyone uses. Responsibilities include on-call and reviews." }, { jobId: job.id });
-  assert.equal(getJob(job.id)!.title, "Platform Intern");
+  importFromBrowser({ url: "https://careers.acme.com/jobs/9", title: "  ", company: "", description_text: "We build the platform everyone uses. Responsibilities include on-call and reviews." }, { jobId: job.id });
+  const after = getJob(job.id)!;
+  assert.equal(after.title, "Platform Intern");
+  assert.equal(after.company, "Acme");
 });
