@@ -50,3 +50,9 @@ bin/
 
 # private planning notes
 docs/
+
+# wither's deploy archive
+next-build.zip
+
+# Claude Code worktrees
+.claude/worktrees/
