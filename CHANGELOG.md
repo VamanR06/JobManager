@@ -6,6 +6,7 @@ the page footer and the MCP server's info. `#N` is the pull request.
 
 | Version | Date | What changed |
 | --- | --- | --- |
+| v0.29.3 | 2026-10-22 | Save to JobManager: "Fill in" always sets the company too, from what /save shows |
 | v0.29.2 | 2026-10-22 | Save to JobManager: "Fill in" also sets the job's title (and replaces a placeholder company) |
 | v0.29.1 | 2026-10-22 | Fix: the Save to JobManager bookmark only opened /save (its address was never set); signing in keeps the posting |
 | v0.29.0 | 2026-10-22 | Version numbers: every commit on main tagged, this changelog, version in the page footer and MCP server info |
