@@ -67,6 +67,17 @@ test("scanned fields are shape-checked before resolving", () => {
   assert.equal(ok?.[0].options.length, 1);
 });
 
+test("long dropdowns keep every option, so a school deep in the list still matches", () => {
+  const schools = Array.from({ length: 3301 }, (_, i) => ({ label: `School ${i}`, selector: null, value: null }));
+  schools[3000] = { label: "University of Michigan", selector: null, value: null };
+  const [field] = parseScannedFields([{ key: "school", selector: "#school", kind: "select", label: "School", required: true, options: schools }])!;
+  assert.equal(field.options.length, 3301);
+  const job = createJob({ company: "Palantir", title: "Intern" });
+  setProfileFacts({ school: "University of Michigan" });
+  const plan = planFill(job.id, [field]);
+  assert.equal(plan.fill[0]?.answer, "University of Michigan");
+});
+
 test("the in-page filler fills a Lever form from the plan and attaches the resume", async () => {
   const job = createJob({ company: "Xcimer", title: "Engineer 2" });
   const { doc } = saveUploadedDocument("resume", "Candidate_Resume.pdf", Buffer.from("%PDF-1.4 other"));

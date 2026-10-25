@@ -6,6 +6,7 @@ the page footer and the MCP server's info. `#N` is the pull request.
 
 | Version | Date | What changed |
 | --- | --- | --- |
+| v0.30.1 | 2026-10-25 | Fix: in-browser autofill keeps long dropdowns whole (a 3,301-school list was cut at 500) |
 | v0.30.0 | 2026-10-23 | #28 Fill applications in your own browser (NotchMan): match a page to its job, scan, resolve with the autofill rules |
 | v0.29.2 | 2026-10-22 | Save to JobManager: "Fill in" also sets the job's title (and replaces a placeholder company) |
 | v0.29.1 | 2026-10-22 | Fix: the Save to JobManager bookmark only opened /save (its address was never set); signing in keeps the posting |
