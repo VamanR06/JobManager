@@ -142,6 +142,9 @@ export function planFill(jobId: number, scanned: ScannedField[]): FillPlan {
   return { fill, fields };
 }
 
+/** Options kept per field: generous enough for full school and country lists. */
+export const MAX_OPTIONS = 10_000;
+
 /** Rough shape check on what a browser sent, so a malformed body can't reach the resolver. */
 export function parseScannedFields(value: unknown): ScannedField[] | null {
   if (!Array.isArray(value) || value.length > 400) return null;
@@ -161,7 +164,8 @@ export function parseScannedFields(value: unknown): ScannedField[] | null {
       selector: f.selector.slice(0, 500),
       value: typeof f.value === "string" ? f.value.slice(0, 5000) : "",
       maxLength: typeof f.maxLength === "number" ? f.maxLength : null,
-      options: options.slice(0, 500).flatMap((o) =>
+      // Real dropdowns run long (a university list had 3,301 entries); cutting them short loses the answer.
+      options: options.slice(0, MAX_OPTIONS).flatMap((o) =>
         o && typeof o === "object" && typeof (o as FieldOption).label === "string"
           ? [{
               label: (o as FieldOption).label.slice(0, 500),
