@@ -500,6 +500,27 @@ const MIGRATIONS: { version: number; name: string; foreignKeysOff?: boolean; up:
       backfillPostingKeys(db);
     },
   },
+  {
+    version: 10,
+    name: "work experience, for filling repeated Work Experience sections (Workday's My Experience)",
+    up(db) {
+      // Months are "YYYY-MM"; end_month is NULL while current = 1. position orders them as on a resume.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS work_experiences (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          position INTEGER NOT NULL DEFAULT 0,
+          title TEXT NOT NULL,
+          company TEXT NOT NULL,
+          location TEXT NOT NULL DEFAULT '',
+          start_month TEXT,
+          end_month TEXT,
+          current INTEGER NOT NULL DEFAULT 0,
+          description TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+      `);
+    },
+  },
 ];
 
 /**
