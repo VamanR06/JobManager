@@ -55,3 +55,18 @@ export type FieldCategory = "fact" | "eligibility" | "demographic" | "attestatio
 export type FieldStatus = "resolved" | "unknown" | "skipped" | "filled" | "mismatch" | "unsupported";
 
 export type AnswerScope = "global" | "company" | "job";
+
+/** A job on the Profile page, for filling repeated Work Experience sections. Months are "YYYY-MM". */
+export interface WorkExperience {
+  id: number;
+  title: string;
+  company: string;
+  location: string;
+  start_month: string | null;
+  /** null while `current`. */
+  end_month: string | null;
+  current: boolean;
+  description: string;
+}
+
+export type WorkExperienceInput = Omit<WorkExperience, "id">;

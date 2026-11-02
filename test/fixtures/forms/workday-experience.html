@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>My Experience</title></head>
+<body>
+<!-- Shaped like Workday's "My Experience" step: no Work Experience entries until Add is clicked; each entry is a
+     role=group labelled "Work Experience N" with data-automation-id'd fields and a From/To date of Month and Year
+     boxes. Education follows with its own Add button. Written by hand for tests; not a copy of Workday's markup. -->
+<h2>My Experience</h2>
+<div data-automation-id="workExperienceSection">
+  <h3>Work Experience</h3>
+  <div id="work-entries"></div>
+  <button type="button" id="add-work" data-automation-id="Add">Add</button>
+</div>
+<div data-automation-id="educationSection">
+  <h3>Education</h3>
+  <div role="group" aria-labelledby="edu-1-h">
+    <h4 id="edu-1-h">Education 1</h4>
+    <label for="school">School or University*</label><input id="school" data-automation-id="school" type="text" required>
+  </div>
+  <button type="button" id="add-edu">Add Another</button>
+</div>
+<h3>Websites</h3>
+<label for="url">URL</label><input id="url" type="text">
+<script>
+  let n = 0;
+  document.getElementById("add-work").addEventListener("click", (e) => {
+    n += 1;
+    const id = "we" + n;
+    const panel = document.createElement("div");
+    panel.setAttribute("role", "group");
+    panel.setAttribute("aria-labelledby", id + "-h");
+    panel.innerHTML = `
+      <h4 id="${id}-h">Work Experience ${n}</h4>
+      <div data-automation-id="formField-jobTitle"><label for="${id}-title">Job Title*</label><input id="${id}-title" data-automation-id="jobTitle" type="text" required></div>
+      <div data-automation-id="formField-companyName"><label for="${id}-company">Company*</label><input id="${id}-company" data-automation-id="company" type="text" required></div>
+      <div data-automation-id="formField-location"><label for="${id}-location">Location</label><input id="${id}-location" data-automation-id="location" type="text"></div>
+      <div data-automation-id="formField-currentlyWorkHere"><input id="${id}-current" type="checkbox" data-automation-id="currentlyWorkHere"><label for="${id}-current">I currently work here</label></div>
+      <div data-automation-id="formField-startDate"><label>From*</label>
+        <div data-automation-id="dateInputWrapper">
+          <input id="${id}-from-m" aria-label="Month" data-automation-id="dateSectionMonth-input" type="text" role="spinbutton">
+          <input id="${id}-from-y" aria-label="Year" data-automation-id="dateSectionYear-input" type="text" role="spinbutton">
+        </div></div>
+      <div data-automation-id="formField-endDate"><label>To</label>
+        <div data-automation-id="dateInputWrapper">
+          <input id="${id}-to-m" aria-label="Month" data-automation-id="dateSectionMonth-input" type="text" role="spinbutton">
+          <input id="${id}-to-y" aria-label="Year" data-automation-id="dateSectionYear-input" type="text" role="spinbutton">
+        </div></div>
+      <div data-automation-id="formField-roleDescription"><label for="${id}-desc">Role Description</label><textarea id="${id}-desc" data-automation-id="description"></textarea></div>`;
+    document.getElementById("work-entries").appendChild(panel);
+    e.target.textContent = "Add Another";
+  });
+</script>
+</body>
+</html>

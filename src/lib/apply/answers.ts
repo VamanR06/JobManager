@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { getDb } from "../db";
-import type { AnswerScope, FieldCategory } from "../workflow-types";
+import type { AnswerScope, FieldCategory, WorkExperience } from "../workflow-types";
 import type { ScannedField } from "./scan";
 
 /**
@@ -32,6 +32,8 @@ export interface ResolveContext {
   resumePath: string | null;
   /** Local path of a cover letter linked to the job, if any. */
   coverLetterPath: string | null;
+  /** The Profile's work experience, most recent first: Work Experience 1, 2, … on a form. */
+  experiences?: WorkExperience[];
 }
 
 // ---------- text normalisation ----------
@@ -257,6 +259,73 @@ export function addGlobalAnswer(question: string, answer: string): void {
     .run(key, question.trim(), answer);
 }
 
+// ---------- work experience ----------
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** The Profile's current job's company or title, when the Profile has no separate fact for it. */
+function currentJob(experiences: WorkExperience[] | undefined, key: "current_company" | "current_title"): string | undefined {
+  const job = experiences?.find((e) => e.current);
+  return job ? (key === "current_company" ? job.company : job.title) : undefined;
+}
+
+/**
+ * What goes in a field of Work Experience N (Workday's My Experience and the like): job title, company,
+ * location, "I currently work here", From/To (whole dates or Month and Year boxes) and the role description,
+ * from the Profile's Nth job. null = not one of those fields; the usual rules apply.
+ */
+export function resolveExperienceField(f: ScannedField, experiences: WorkExperience[]): Resolution | null {
+  const l = norm(f.label);
+  const category: FieldCategory = "fact";
+  const which =
+    f.kind === "checkbox" && /currently (work|employed)|current (job|position|role|employer)|work here|present/.test(l) ? "current"
+    : /^(role |job |position )?description|responsibilit|duties|^summary$|^accomplishments$/.test(l) ? "description"
+    : /^(from|start)( date)?\b|^date (from|started)/.test(l) ? "start"
+    : /^(to|end)( date)?\b|^date (to|ended)|^until\b/.test(l) ? "end"
+    : /location|^city\b/.test(l) ? "location"
+    : /company|employer|organi[sz]ation/.test(l) ? "company"
+    : /title|^position$|^role$/.test(l) ? "title"
+    : null;
+  if (!which) return null;
+  const index = f.section?.index ?? 1;
+  const job = experiences[index - 1];
+  if (!job) {
+    const note = experiences.length
+      ? `Your Profile has ${experiences.length} job${experiences.length === 1 ? "" : "s"}, not ${index}`
+      : "Add your work experience on the Profile page";
+    return { category, answer: null, source: null, status: f.required ? "unknown" : "skipped", note };
+  }
+  const source = `work experience ${index} (${job.company})`;
+  const skip = (note: string): Resolution => ({ category, answer: null, source, status: "skipped", note });
+  switch (which) {
+    case "current":
+      return job.current ? fit(f, "Yes", source, category) : skip("Not a current job");
+    case "start":
+    case "end": {
+      if (which === "end" && job.current) return skip("Current job: no end date");
+      const month = which === "start" ? job.start_month : job.end_month;
+      if (!month) {
+        return { category, answer: null, source, status: f.required ? "unknown" : "skipped", note: `No ${which} month for this job on your Profile` };
+      }
+      const [year, mm] = month.split("-");
+      const part = /\bmonth$/.test(l) ? "month" : /\byear$/.test(l) ? "year" : null;
+      if (part === "year") return fit(f, year, source, category);
+      if (part === "month") {
+        if (!f.options.length) return { category, answer: mm, source, status: "resolved" };
+        const labels = f.options.map((o) => o.label);
+        const pick = [MONTHS[Number(mm) - 1], mm, String(Number(mm))].map((v) => matchOption(v, labels)).find(Boolean);
+        return pick ? { category, answer: pick, source, status: "resolved" } : fit(f, MONTHS[Number(mm) - 1], source, category);
+      }
+      // One box for the whole date: date pickers get a full date, text boxes MM/YYYY.
+      return { category, answer: f.inputType === "date" ? `${mm}/01/${year}` : `${mm}/${year}`, source, status: "resolved" };
+    }
+    default: {
+      const value = job[which];
+      return value ? fit(f, value, source, category) : skip(`No ${which} for this job on your Profile`);
+    }
+  }
+}
+
 // ---------- resolution ----------
 
 function yesNo(v: string | undefined): "Yes" | "No" | null {
@@ -309,6 +378,12 @@ export function resolveField(f: ScannedField, ctx: ResolveContext): Resolution {
 
   if (!f.label) return { category, answer: null, source: null, status: f.required ? "unsupported" : "skipped", note: "Field has no readable label" };
 
+  // A field in Work Experience N comes from the Profile's Nth job (the answer bank can't tell the sections apart).
+  if (f.section?.kind === "work" && f.kind !== "file") {
+    const r = resolveExperienceField(f, ctx.experiences ?? []);
+    if (r) return r;
+  }
+
   // Saved answers take precedence for everything except files and demographic policy.
   if (category !== "file" && category !== "demographic") {
     const saved = lookupAnswer(f.label, labels, ctx);
@@ -334,7 +409,8 @@ export function resolveField(f: ScannedField, ctx: ResolveContext): Resolution {
     }
     case "fact": {
       const rule = FACT_RULES.find((r) => r.test.test(l))!;
-      const value = typeof rule.key === "function" ? rule.key(ctx.profile) : ctx.profile[rule.key];
+      const value = (typeof rule.key === "function" ? rule.key(ctx.profile) : ctx.profile[rule.key]) ||
+        (rule.key === "current_company" || rule.key === "current_title" ? currentJob(ctx.experiences, rule.key) : undefined);
       if (!value) return unknown(`Not in your Profile yet (${typeof rule.key === "string" ? rule.key : "graduation"})`);
       return fit(f, value, "profile", category);
     }

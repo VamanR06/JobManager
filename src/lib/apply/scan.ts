@@ -35,6 +35,13 @@ export interface ScannedField {
   value: string;
   /** The input's maxlength, when the page sets one. */
   maxLength?: number | null;
+  /** In a repeated section ("Work Experience 2", Workday's My Experience): which kind, and its number from 1. */
+  section?: FieldSection | null;
+}
+
+export interface FieldSection {
+  kind: "work" | "education";
+  index: number;
 }
 
 export interface ScanResult {
@@ -139,6 +146,60 @@ export const SCAN_SCRIPT = String.raw`(() => {
     return values.length ? values.map((v) => clean(v.textContent)).filter(Boolean).join("; ") : clean(el.value);
   };
 
+  // Repeated sections: Workday tags each with data-automation-id="workExperience-2"; elsewhere a group labelled, or
+  // a heading reading, "Work Experience 2" (or just "Work Experience" for a single one; a bare "Experience" only
+  // with a number, since forms also use it for a block of questions).
+  const SECTION = /^(work experience|professional experience|employment( history)?|work history|experience|education)(\s+\d+)?$/i;
+  const sectionFrom = (text) => {
+    const m = clean(text).replace(/\s+(delete|remove)\b.*$/i, "").match(SECTION);
+    if (!m || (/^experience$/i.test(m[1]) && !m[3])) return null;
+    return { kind: /^educ/i.test(m[1]) ? "education" : "work", index: m[3] ? Number(m[3]) : 1 };
+  };
+  const headings = Array.from(document.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, [role=heading]"));
+  // The section an element itself is (Workday's tag, or a group labelled "Work Experience 2"), if any.
+  const sectionBox = (a) => {
+    const auto = (a.getAttribute("data-automation-id") || "").match(/^(workExperience|education)-(\d+)$/i);
+    if (auto) return { kind: /^work/i.test(auto[1]) ? "work" : "education", index: Number(auto[2]) };
+    if (/^(group|region)$/.test(a.getAttribute("role") || "") || a.tagName === "SECTION") {
+      const by = a.getAttribute("aria-labelledby");
+      const text = by ? by.split(/\s+/).map((i) => (document.getElementById(i) || {}).textContent || "").join(" ") : a.getAttribute("aria-label");
+      return (text && sectionFrom(text)) || null;
+    }
+    return null;
+  };
+  const isSectionBox = (a) => !!sectionBox(a);
+  const sectionOf = (el) => {
+    for (let a = el.parentElement, depth = 0; a && depth < 15; a = a.parentElement, depth++) {
+      const found = sectionBox(a);
+      if (found) return found;
+    }
+    // Otherwise the nearest heading before the field, if it's a section's.
+    let last = null;
+    for (const h of headings) {
+      if (h.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) last = h; else break;
+    }
+    return last ? sectionFrom(last.textContent) : null;
+  };
+  // The Month / Year boxes of one date (Workday's "From": Month, Year) take the date's label: "From Month".
+  const PART = /^(month|mm|year|yyyy|yy|day|dd)$/i;
+  const partOf = (el, text) => {
+    const auto = (el.getAttribute("data-automation-id") || "").match(/dateSection(Month|Year|Day)/i);
+    const placeholder = clean(el.getAttribute("placeholder"));
+    const word = auto ? auto[1] : PART.test(text) ? text : PART.test(placeholder) ? placeholder : "";
+    if (!word) return null;
+    const w = word.toLowerCase();
+    return w[0] === "m" ? "Month" : w[0] === "d" ? "Day" : "Year";
+  };
+  const dateLabelOf = (el) => {
+    for (let a = el.parentElement, depth = 0; a && depth < 6; a = a.parentElement, depth++) {
+      for (const l of a.querySelectorAll("label, legend")) {
+        const t = clean(l.textContent);
+        if (t && !PART.test(t) && !l.querySelector("input, select, textarea")) return { text: t, raw: l.textContent };
+      }
+    }
+    return { text: "", raw: "" };
+  };
+
   const fields = [];
   const seenGroups = new Set();
   const handled = new Set();
@@ -171,9 +232,11 @@ export const SCAN_SCRIPT = String.raw`(() => {
       // A fieldset (or checkbox-group) with its own heading is one question, even when each
       // checkbox has a different name (Ashby names them after the option text).
       // (Ashby wraps each checkbox in a "…checkbox-group-option-checkbox" span; that's an option, not the group.)
-      const box = type === "checkbox"
+      // A whole Work Experience entry is a group too, but its "I currently work here" box is a question of its own.
+      let box = type === "checkbox"
         ? el.closest("fieldset, [role=group]") || Array.from(document.querySelectorAll("[class*='checkbox-group']")).find((g) => g.contains(el) && !/option/i.test(String(g.className))) || null
         : null;
+      if (box && isSectionBox(box)) box = null;
       let members;
       let groupKey;
       if (box) {
@@ -213,8 +276,13 @@ export const SCAN_SCRIPT = String.raw`(() => {
       continue;
     }
     const s = sel(el);
-    const lab = labelOf(el);
+    let lab = labelOf(el);
     if (!lab.text || (el.getAttribute("tabindex") === "-1" && !el.id && !el.name)) continue; // unlabeled helper inputs (e.g. react-select's hidden required input)
+    const part = el.tagName === "INPUT" ? partOf(el, lab.text) : null;
+    if (part) {
+      const base = PART.test(lab.text) ? dateLabelOf(el) : lab;
+      if (base.text) lab = { text: base.text + " " + part, raw: base.raw };
+    }
     const required = el.required || el.getAttribute("aria-required") === "true" || requiredByClass(el) || isRequiredText(lab.raw);
     if (el.tagName === "SELECT") {
       const options = Array.from(el.options)
@@ -246,6 +314,12 @@ export const SCAN_SCRIPT = String.raw`(() => {
       options: btns.map((b) => ({ label: clean(b.textContent), selector: sel(b), value: b.getAttribute("data-option") })),
       selector: sel(btns[0]), value: pressed.map((b) => clean(b.textContent)).join("; "),
     });
+  }
+
+  for (const f of fields) {
+    let el = null;
+    try { el = document.querySelector(f.selector); } catch (e) {}
+    f.section = el ? sectionOf(el) : null;
   }
 
   const blockers = [];

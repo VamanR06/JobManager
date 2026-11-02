@@ -3,6 +3,7 @@ import path from "path";
 import type { Page } from "playwright";
 import { ARTIFACTS_DIR, DATA_DIR, getDb, WORK_DIR } from "../db";
 import { getDocument, getJob } from "../queries";
+import { listExperiences } from "../experience";
 import { getProfileMap } from "../profile";
 import { logEvent, markSubmitted } from "../submission";
 import { matchOption } from "./answers";
@@ -531,7 +532,10 @@ export class Harness {
       const outcome = await prepareApplication({
         page, resumeFileName: resume?.name ?? null, stopRequested: () => false, formWaitMs: 5_000,
         adoptPage: (p) => this.browser.adopt(jobId, p, hosts),
-        ctx: { profile: getProfileMap(), company: job.company, jobId, resumePath: resume?.file ?? null, coverLetterPath: cover },
+        ctx: {
+          profile: getProfileMap(), company: job.company, jobId, resumePath: resume?.file ?? null, coverLetterPath: cover,
+          experiences: listExperiences(),
+        },
       });
       logEvent(jobId, `chatgpt:autofill:${outcome.kind}`, outcome.message);
       return this.withSnapshot(this.page(jobId), {

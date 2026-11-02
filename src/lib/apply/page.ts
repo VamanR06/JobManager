@@ -1,12 +1,13 @@
 import path from "path";
 import { getDb } from "../db";
+import { listExperiences } from "../experience";
 import { getProfileMap } from "../profile";
 import { getDocument, getJob } from "../queries";
 import type { AppDocument, Job } from "../types";
 import { analyzeUrl } from "../urls";
 import { resolveField, type Resolution } from "./answers";
 import { toPickerDate } from "./fill";
-import type { FieldOption, ScannedField } from "./scan";
+import type { FieldOption, FieldSection, ScannedField } from "./scan";
 
 /**
  * Filling an application in the person's own browser (NotchMan): it reads the form with SCAN_SCRIPT, asks
@@ -114,6 +115,7 @@ export function planFill(jobId: number, scanned: ScannedField[]): FillPlan {
     jobId,
     resumePath: job.resume_id && getDocument(job.resume_id) ? RESUME : null,
     coverLetterPath: job.cover_letter_id && getDocument(job.cover_letter_id) ? COVER_LETTER : null,
+    experiences: listExperiences(),
   };
   const fill: FillStep[] = [];
   const fields: FieldPlan[] = [];
@@ -145,6 +147,13 @@ export function planFill(jobId: number, scanned: ScannedField[]): FillPlan {
 /** Options kept per field: generous enough for full school and country lists. */
 export const MAX_OPTIONS = 10_000;
 
+function parseSection(value: unknown): FieldSection | null {
+  if (!value || typeof value !== "object") return null;
+  const { kind, index } = value as Record<string, unknown>;
+  if ((kind !== "work" && kind !== "education") || typeof index !== "number" || !Number.isInteger(index) || index < 1 || index > 50) return null;
+  return { kind, index };
+}
+
 /** Rough shape check on what a browser sent, so a malformed body can't reach the resolver. */
 export function parseScannedFields(value: unknown): ScannedField[] | null {
   if (!Array.isArray(value) || value.length > 400) return null;
@@ -164,6 +173,7 @@ export function parseScannedFields(value: unknown): ScannedField[] | null {
       selector: f.selector.slice(0, 500),
       value: typeof f.value === "string" ? f.value.slice(0, 5000) : "",
       maxLength: typeof f.maxLength === "number" ? f.maxLength : null,
+      section: parseSection(f.section),
       // Real dropdowns run long (a university list had 3,301 entries); cutting them short loses the answer.
       options: options.slice(0, MAX_OPTIONS).flatMap((o) =>
         o && typeof o === "object" && typeof (o as FieldOption).label === "string"
@@ -271,6 +281,43 @@ export const PAGE_FILL_SCRIPT = String.raw`((steps, files) => {
     }
   }
   return results;
+})`;
+
+/**
+ * Runs in the person's browser with `(want)`: Workday-style forms start with no Work Experience entries (or one)
+ * and an Add button. This clicks it once if the page has fewer than `want` entries, and reports
+ * `{ have, clicked }`; the caller waits for the new entry and runs it again. Only ever clicks a button reading
+ * "Add" / "Add Another" under the Work Experience heading (or labelled "Add Work Experience"), never a submit.
+ * Must stay plain browser JavaScript (String.raw), like scan.ts.
+ */
+export const ADD_SECTIONS_SCRIPT = String.raw`((want) => {
+  const clean = (t) => (t || "").replace(/\s+/g, " ").replace(/[*✱]/g, "").trim();
+  const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 || r.height > 0; };
+  const after = (a, b) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const WORK = /^(work experience|professional experience|employment( history)?|work history)(\s+(\d+))?$/i;
+  const heads = Array.from(document.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, [role=heading]")).filter(visible);
+  let have = 0;
+  for (const el of document.querySelectorAll("[data-automation-id^='workExperience-']")) {
+    const m = el.getAttribute("data-automation-id").match(/^workExperience-(\d+)$/);
+    if (m) have = Math.max(have, Number(m[1]));
+  }
+  for (const h of heads) {
+    const m = clean(h.textContent).match(WORK);
+    if (m && m[4]) have = Math.max(have, Number(m[4]));
+  }
+  if (have >= want) return { have, clicked: false };
+  const buttons = Array.from(document.querySelectorAll("button, [role=button]")).filter(visible).filter((b) => b.getAttribute("type") !== "submit");
+  let add = buttons.find((b) => /^add (another )?(work )?experience$/i.test(clean(b.getAttribute("aria-label") || b.textContent)));
+  if (!add) {
+    const start = heads.find((h) => { const m = clean(h.textContent).match(WORK); return m && !m[4]; });
+    if (start) {
+      const end = heads.find((h) => after(start, h) && !WORK.test(clean(h.textContent)));
+      add = buttons.find((b) => after(start, b) && (!end || after(b, end)) && /^add( another)?$/i.test(clean(b.textContent)));
+    }
+  }
+  if (!add) return { have, clicked: false };
+  add.click();
+  return { have, clicked: true };
 })`;
 
 /**
