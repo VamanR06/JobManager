@@ -6,6 +6,7 @@ the page footer and the MCP server's info. `#N` is the pull request.
 
 | Version | Date | What changed |
 | --- | --- | --- |
+| v0.32.0 | 2026-11-02 | Work Experience sections get only the Profile jobs the job's resume mentions, in the resume's order |
 | v0.31.0 | 2026-11-02 | #30 Work experience on the Profile fills Work Experience 1, 2, … sections (Workday's My Experience), adding entries first |
 | v0.30.1 | 2026-10-25 | #29 Fix: in-browser autofill keeps long dropdowns whole (a 3,301-school list was cut at 500) |
 | v0.30.0 | 2026-10-23 | #28 Fill applications in your own browser (NotchMan): match a page to its job, scan, resolve with the autofill rules |

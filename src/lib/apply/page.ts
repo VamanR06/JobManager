@@ -4,6 +4,7 @@ import { listExperiences } from "../experience";
 import { getProfileMap } from "../profile";
 import { getDocument, getJob } from "../queries";
 import type { AppDocument, Job } from "../types";
+import type { WorkExperience } from "../workflow-types";
 import { analyzeUrl } from "../urls";
 import { resolveField, type Resolution } from "./answers";
 import { toPickerDate } from "./fill";
@@ -105,8 +106,12 @@ export interface FillPlan {
 const RESUME = "\u0000resume";
 const COVER_LETTER = "\u0000cover_letter";
 
-/** What goes in each scanned field of `jobId`'s form, by `answers.ts`'s rules. */
-export function planFill(jobId: number, scanned: ScannedField[]): FillPlan {
+/**
+ * What goes in each scanned field of `jobId`'s form, by `answers.ts`'s rules. `experiences` fill the Work
+ * Experience sections (the route passes the ones the job's resume mentions: `experiencesForJob`); all of the
+ * Profile's when not given.
+ */
+export function planFill(jobId: number, scanned: ScannedField[], experiences: WorkExperience[] = listExperiences()): FillPlan {
   const job = getJob(jobId);
   if (!job) throw new Error("Job not found");
   const ctx = {
@@ -115,7 +120,7 @@ export function planFill(jobId: number, scanned: ScannedField[]): FillPlan {
     jobId,
     resumePath: job.resume_id && getDocument(job.resume_id) ? RESUME : null,
     coverLetterPath: job.cover_letter_id && getDocument(job.cover_letter_id) ? COVER_LETTER : null,
-    experiences: listExperiences(),
+    experiences,
   };
   const fill: FillStep[] = [];
   const fields: FieldPlan[] = [];
