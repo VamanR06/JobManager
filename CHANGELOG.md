@@ -6,7 +6,7 @@ the page footer and the MCP server's info. `#N` is the pull request.
 
 | Version | Date | What changed |
 | --- | --- | --- |
-| v0.32.1 | 2026-11-11 | PDF resumes are readable on Node older than 22 (pdf.js failed to load with "Iterator is not defined", so Work Experience fell back to every Profile job); the fallback note now says why a resume couldn't be read |
+| v0.32.1 | 2026-11-11 | # PDF resumes are readable on Node older than 22 (pdf.js failed to load with "Iterator is not defined", so Work Experience fell back to every Profile job); the fallback note now says why a resume couldn't be read |
 | v0.32.0 | 2026-11-02 | #31 Work Experience sections get only the Profile jobs the job's resume mentions, in the resume's order |
 | v0.31.0 | 2026-11-02 | #30 Work experience on the Profile fills Work Experience 1, 2, … sections (Workday's My Experience), adding entries first |
 | v0.30.1 | 2026-10-25 | #29 Fix: in-browser autofill keeps long dropdowns whole (a 3,301-school list was cut at 500) |
