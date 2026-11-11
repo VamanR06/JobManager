@@ -1,4 +1,5 @@
 import fs from "fs";
+import { createRequire } from "module";
 import path from "path";
 import { DATA_DIR } from "./db";
 import { listExperiences } from "./experience";
@@ -54,29 +55,67 @@ export function matchExperiences(experiences: WorkExperience[], resumeText: stri
     .map((m) => m.e);
 }
 
+/**
+ * pdf.js (inside unpdf) uses built-ins from Node 22+ (`Iterator`, `process.getBuiltinModule`, `URL.parse`), and
+ * without them it fails to load at all ("Iterator is not defined"), so on an older Node every PDF was unreadable.
+ * Only what's missing is added.
+ */
+function addPdfjsBuiltins(): void {
+  const g = globalThis as { Iterator?: unknown };
+  if (typeof g.Iterator === "undefined") {
+    // The prototype every built-in iterator inherits from; pdf.js only adds methods to it.
+    const prototype = Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]()));
+    const Iterator = function Iterator() {};
+    Iterator.prototype = prototype;
+    Object.defineProperty(globalThis, "Iterator", { value: Iterator, writable: true, configurable: true });
+  }
+  const proc = process as { getBuiltinModule?: (id: string) => unknown };
+  if (typeof proc.getBuiltinModule !== "function") {
+    const load = createRequire(path.join(process.cwd(), "package.json"));
+    proc.getBuiltinModule = (id: string) => load(id);
+  }
+  const url = URL as { parse?: (u: string, base?: string | URL) => URL | null };
+  if (typeof url.parse !== "function") {
+    url.parse = (u, base) => {
+      try {
+        return new URL(u, base);
+      } catch {
+        return null;
+      }
+    };
+  }
+}
+
 const cache = new Map<string, string>();
 
-/** The resume's text: PDFs through pdf.js (unpdf), plain text and Markdown as they are. null if unreadable. */
-export async function documentText(doc: AppDocument): Promise<string | null> {
+/** The resume's text (PDFs through pdf.js via unpdf, plain text and Markdown as they are), or why it has none. */
+export async function documentText(doc: AppDocument): Promise<{ text: string } | { error: string }> {
   const key = doc.content_sha256 ?? doc.file_path;
-  if (cache.has(key)) return cache.get(key)!;
+  const cached = cache.get(key);
+  if (cached) return { text: cached };
   const file = path.join(DATA_DIR, doc.file_path);
-  if (!fs.existsSync(file)) return null;
+  if (!fs.existsSync(file)) return { error: "the file is missing" };
   const ext = path.extname(doc.file_path).toLowerCase();
-  let text: string | null = null;
+  let text: string;
   try {
     if (ext === ".pdf") {
+      addPdfjsBuiltins();
       const { extractText, getDocumentProxy } = await import("unpdf");
       const pdf = await getDocumentProxy(new Uint8Array(fs.readFileSync(file)));
       text = (await extractText(pdf, { mergePages: true })).text;
     } else if (ext === ".txt" || ext === ".md") {
       text = fs.readFileSync(file, "utf8");
+    } else {
+      return { error: "only PDF, .txt and .md can be read" };
     }
-  } catch {
-    text = null;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[resume-experience] reading ${doc.file_path} failed (Node ${process.version}):`, err);
+    return { error: message };
   }
-  if (text?.trim()) cache.set(key, text);
-  return text?.trim() ? text : null;
+  if (!text.trim()) return { error: "it has no text (a scanned image?)" };
+  cache.set(key, text);
+  return { text };
 }
 
 /** The Profile jobs to fill for `jobId`: the ones its resume mentions, else all of them (with the reason). */
@@ -86,9 +125,9 @@ export async function experiencesForJob(jobId: number | null): Promise<ResumeMat
   const job = jobId ? getJob(jobId) : null;
   const doc = job?.resume_id ? getDocument(job.resume_id) : null;
   if (!doc) return { experiences: all, fallback: "No resume picked for this job" };
-  const text = await documentText(doc);
-  if (!text) return { experiences: all, fallback: `Couldn't read ${doc.name} (PDF, .txt or .md only)` };
-  const matched = matchExperiences(all, text);
+  const read = await documentText(doc);
+  if ("error" in read) return { experiences: all, fallback: `Couldn't read ${doc.name}: ${read.error}` };
+  const matched = matchExperiences(all, read.text);
   if (!matched.length) return { experiences: all, fallback: `${doc.name} doesn't name any of your Profile's companies` };
   return { experiences: matched, fallback: null };
 }
