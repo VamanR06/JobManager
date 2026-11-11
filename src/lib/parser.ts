@@ -207,7 +207,15 @@ export async function parsePostingUrl(url: string, fetcher: Fetcher = defaultFet
   const workday = api ? await fromWorkdayApi(api, fetcher) : null;
   if (workday && "posting" in workday) return workday.posting;
 
-  const res = await fetcher(url);
+  let res: SafeResponse;
+  try {
+    res = await fetcher(url);
+  } catch (err) {
+    // No reply from the site (connection refused/reset, timeout, DNS…): say so, with Workday's API result too.
+    const msg = err instanceof Error ? err.message : String(err);
+    const api = workday && "failed" in workday && workday.failed !== msg ? ` (Workday API: ${workday.failed})` : "";
+    throw new Error(`${msg}${api}`);
+  }
   const result = res.ok ? parsePostingHtml(res.body, res.finalUrl) : null;
   if (result?.description_md) return result;
 
